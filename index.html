@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+</head>
+<body>
+<title>Daily Arcade</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Chakra+Petch:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: arcade cabinet — HUD marquee on top, "now playing" screen + stage track below, tabs for side games. Single deliberate dark neon look. */
+:root{
+  color-scheme: dark;
+  --bg:#0a0718; --bg2:#120d2a; --panel:#17113a; --panel2:#1f1750; --line:#2f2670; --dim:#8b84c2; --fg:#efeaff;
+  --pink:#ff3ea5; --cyan:#2de2e6; --yellow:#ffd319; --lime:#7dff8a; --orange:#ff8a3d; --red:#ff4b5c; --violet:#b07bff;
+  --k-wake:#ff4b5c; --k-sleep:#ff4b5c; --k-study:#38a8ff; --k-gym:#ffd319; --k-pt:#7dff8a; --k-lecture:#c9b6ff; --k-lab:#ffe3a3; --k-tut:#ffb8a3; --k-work:#ff8a3d; --k-quest:#ff3ea5; --k-other:#9aa7c7;
+  --r-common:#9aa7c7; --r-rare:#2de2e6; --r-epic:#c86bff; --r-legendary:#ffd319;
+  --f-display:"Press Start 2P", ui-monospace, monospace;
+  --f-body:"Chakra Petch", system-ui, sans-serif;
+  --f-digits:"VT323", ui-monospace, monospace;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--f-body);font-size:15px;line-height:1.45;min-height:100%;
+  background:radial-gradient(120% 60% at 50% -10%, #2a1660 0%, transparent 60%), linear-gradient(var(--bg), var(--bg2)) fixed;}
+button{font:inherit;color:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:var(--fg);background:var(--bg);border:2px solid var(--line);border-radius:0;padding:8px 10px;min-width:0}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.crt{position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(to bottom, rgba(255,255,255,.025) 0 1px, transparent 1px 3px);mix-blend-mode:overlay}
+#fx{position:fixed;inset:0;pointer-events:none;z-index:40;width:100%;height:100%}
+.app{max-width:1180px;margin:0 auto;padding-left:max(16px, env(safe-area-inset-left,0px));padding-right:max(16px, env(safe-area-inset-right,0px));padding-block:16px 48px;display:flex;flex-direction:column;gap:16px}
+.shake{animation:shake .32s steps(2) 1}
+@keyframes shake{0%{transform:translate(0,0)}25%{transform:translate(-4px,2px)}50%{transform:translate(3px,-3px)}75%{transform:translate(-2px,1px)}100%{transform:translate(0,0)}}
+
+/* HUD */
+.hud{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;padding:14px 16px;background:linear-gradient(180deg,var(--panel2),var(--panel));border:2px solid var(--line);box-shadow:0 0 0 2px #000 inset, 0 8px 30px rgba(255,62,165,.12)}
+.brand{font-family:var(--f-display);font-size:12px;line-height:1.6;letter-spacing:.06em;color:var(--pink);text-shadow:0 0 10px rgba(255,62,165,.6)}
+.brand span{display:block;color:var(--cyan);text-shadow:0 0 10px rgba(45,226,230,.6)}
+.lvl{display:flex;gap:14px;align-items:center;min-width:0}
+.lvl-badge{font-family:var(--f-display);font-size:10px;color:var(--yellow);border:2px solid var(--yellow);padding:8px 10px;text-align:center;line-height:1.5;flex:none;box-shadow:0 0 12px rgba(255,211,25,.35)}
+.lvl-badge b{display:block;font-size:18px;font-weight:400}
+.lvl-meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.rank{font-family:var(--f-display);font-size:10px;letter-spacing:.08em;color:var(--fg)}
+.xpbar{height:14px;background:#000;border:2px solid var(--line);position:relative;overflow:hidden}
+.xpbar i{position:absolute;inset:0 auto 0 0;width:0;background:repeating-linear-gradient(90deg,var(--cyan) 0 10px,#1fb5b9 10px 12px);transition:width .6s steps(12);box-shadow:0 0 12px var(--cyan)}
+.xptext{font-family:var(--f-digits);font-size:18px;color:var(--dim);line-height:1}
+.counters{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.ctr{min-width:74px;padding:6px 10px;background:#000;border:2px solid var(--line);text-align:center}
+.ctr small{display:block;font-family:var(--f-display);font-size:7px;letter-spacing:.1em;color:var(--dim)}
+.ctr b{display:block;font-family:var(--f-digits);font-size:28px;font-weight:400;line-height:1;font-variant-numeric:tabular-nums}
+.ctr.score b{color:var(--yellow)} .ctr.streak b{color:var(--orange)} .ctr.freeze b{color:var(--cyan)} .ctr.combo b{color:var(--pink)}
+.iconbtn{background:#000;border:2px solid var(--line);font-family:var(--f-display);font-size:8px;padding:10px;color:var(--dim)}
+.iconbtn[aria-pressed="true"]{color:var(--lime);border-color:var(--lime)}
+
+/* Tabs */
+.tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.tabs button{flex:none;font-family:var(--f-display);font-size:9px;letter-spacing:.06em;padding:12px 14px;background:var(--panel);border:2px solid var(--line);color:var(--dim)}
+.tabs button[aria-selected="true"]{color:#000;background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 14px rgba(45,226,230,.5)}
+
+/* Panels */
+.panel{background:var(--panel);border:2px solid var(--line);padding:16px;min-width:0}
+.ptitle{font-family:var(--f-display);font-size:10px;letter-spacing:.1em;color:var(--dim);margin:0 0 12px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.grid-today{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px;align-items:start}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+/* Now playing */
+.now{position:relative;overflow:hidden;border-color:var(--pink);box-shadow:0 0 0 2px #000 inset,0 0 26px rgba(255,62,165,.18)}
+.now .tag{font-family:var(--f-display);font-size:9px;color:var(--pink);letter-spacing:.1em}
+.now h2{font-family:var(--f-display);font-size:16px;line-height:1.5;margin:12px 0 4px;text-wrap:balance}
+.now .meta{color:var(--dim);font-size:14px}
+.big-count{font-family:var(--f-digits);font-size:64px;line-height:1;color:var(--cyan);margin:14px 0 4px;font-variant-numeric:tabular-nums;text-shadow:0 0 14px rgba(45,226,230,.5)}
+.big-count small{display:block;font-family:var(--f-display);font-size:8px;letter-spacing:.1em;color:var(--dim);text-shadow:none;margin-top:6px}
+.start-btn{width:100%;margin-top:14px;font-family:var(--f-display);font-size:13px;letter-spacing:.06em;padding:18px 12px;border:none;background:var(--pink);color:#fff;box-shadow:0 6px 0 #9c1a5f, 0 0 24px rgba(255,62,165,.5);transform:translateY(0);transition:transform .06s}
+.start-btn:active{transform:translateY(5px);box-shadow:0 1px 0 #9c1a5f}
+.start-btn.late{background:var(--orange);box-shadow:0 6px 0 #9c4a14}
+.start-btn.wait{background:var(--panel2);color:var(--dim);box-shadow:0 6px 0 #0b0820}
+.start-btn.ready{animation:pulse 1.2s steps(2) infinite}
+@keyframes pulse{50%{filter:brightness(1.25)}}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chip{font-family:var(--f-display);font-size:7px;letter-spacing:.08em;padding:5px 7px;border:2px solid currentColor;line-height:1.3}
+
+/* Stage meter */
+.meter{display:flex;gap:3px;margin-top:6px}
+.meter i{flex:1;height:18px;background:#000;border:2px solid var(--line)}
+.meter i.on{background:var(--lime);border-color:var(--lime);box-shadow:0 0 8px rgba(125,255,138,.5)}
+.meter i.late{background:var(--orange);border-color:var(--orange)}
+.meter i.goal{border-color:var(--yellow)}
+.meter-note{font-size:13px;color:var(--dim);margin-top:8px}
+
+/* Timeline */
+.track{display:flex;flex-direction:column;gap:8px}
+.row{display:grid;grid-template-columns:62px 6px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 12px;background:var(--bg2);border:2px solid var(--line)}
+.row .t{font-family:var(--f-digits);font-size:20px;line-height:1;color:var(--dim);font-variant-numeric:tabular-nums}
+.row .t span{display:block;font-size:16px;opacity:.7}
+.row .bar{align-self:stretch;background:var(--kc)}
+.row .ti{font-weight:600;overflow-wrap:anywhere}
+.row .sub{font-size:13px;color:var(--dim)}
+.row.done{opacity:.62}
+.row.done .ti{text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:var(--lime)}
+.row.ready{border-color:var(--pink);box-shadow:0 0 14px rgba(255,62,165,.25)}
+.row.live{border-color:var(--cyan)}
+.act{font-family:var(--f-display);font-size:8px;letter-spacing:.06em;padding:10px 10px;border:2px solid var(--line);background:#000;color:var(--dim);min-width:96px;text-align:center;line-height:1.5}
+.act.ready{background:var(--pink);border-color:var(--pink);color:#fff}
+.act.late{background:var(--orange);border-color:var(--orange);color:#000}
+.act.done{color:var(--lime);border-color:var(--lime)}
+.act.late-done{color:var(--orange);border-color:var(--orange)}
+.act.live{color:var(--cyan);border-color:var(--cyan)}
+.act.missed{color:var(--red);border-color:var(--red)}
+.empty{padding:22px;text-align:center;color:var(--dim);border:2px dashed var(--line)}
+.empty b{display:block;font-family:var(--f-display);font-size:10px;color:var(--fg);margin-bottom:8px;letter-spacing:.08em}
+
+/* Forms */
+.form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.form input[type=text]{flex:1 1 180px}
+.btn{font-family:var(--f-display);font-size:9px;letter-spacing:.06em;padding:11px 14px;border:2px solid var(--cyan);background:transparent;color:var(--cyan)}
+.btn.solid{background:var(--cyan);color:#000}
+.btn.warn{border-color:var(--red);color:var(--red)}
+.btn.small{font-size:8px;padding:8px 10px}
+.toggle{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--dim)}
+label.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
+
+/* Week */
+.week-wrap{overflow-x:auto}
+.week{display:grid;grid-template-columns:38px repeat(7,minmax(64px,1fr));gap:4px;min-width:560px}
+.week .hd{font-family:var(--f-display);font-size:8px;text-align:center;padding:6px 0;color:var(--dim)}
+.week .hd.today{color:#000;background:var(--yellow)}
+.week .hours{position:relative}
+.week .hours span{position:absolute;right:4px;font-family:var(--f-digits);font-size:15px;color:var(--dim);transform:translateY(-50%)}
+.week .daycol{position:relative;background:#000;border:2px solid var(--line)}
+.week .blk{position:absolute;left:2px;right:2px;background:var(--kc);color:#0a0718;font-size:11px;font-weight:600;line-height:1.15;padding:2px 4px;overflow:hidden;border:1px solid #000}
+.week .blk.pt{height:8px;padding:0}
+.week .blk.ok::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(0,0,0,.35) 0 4px,transparent 4px 8px)}
+.week .blk.ok{outline:2px solid var(--lime);outline-offset:-2px}
+.week .blk.miss{opacity:.35}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--dim);margin-top:12px}
+.legend i{display:inline-block;width:12px;height:12px;background:var(--kc);margin-right:6px;vertical-align:-1px}
+
+/* Bosses */
+.bosses{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.boss{border-color:var(--violet)}
+.boss.dead{border-color:var(--lime);opacity:.75}
+.boss h3{font-family:var(--f-display);font-size:12px;line-height:1.5;margin:0 0 10px;color:var(--violet)}
+.boss.dead h3{color:var(--lime)}
+.hp{display:flex;gap:3px;margin-bottom:12px}
+.hp i{flex:1;height:16px;background:var(--red);border:2px solid #000}
+.hp i.gone{background:#000;border-color:var(--line)}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.steps li{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg2);border:2px solid var(--line)}
+.steps li.hit{opacity:.55;text-decoration:line-through}
+
+/* Loot + trophies */
+.loot-grid,.ach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.item{display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 8px;background:var(--bg2);border:2px solid var(--rc,var(--line));text-align:center}
+.item img{width:56px;height:56px;image-rendering:pixelated}
+.item b{font-size:13px;line-height:1.25}
+.item small{font-family:var(--f-display);font-size:7px;letter-spacing:.08em;color:var(--rc)}
+.item.locked{--rc:var(--line);opacity:.5}
+.item.locked img{filter:grayscale(1) brightness(.5)}
+.rates{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--dim);margin-bottom:14px}
+.rates b{font-weight:600}
+
+/* Editor */
+.daypick{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.daypick button{font-family:var(--f-display);font-size:8px;padding:9px 10px;background:#000;border:2px solid var(--line);color:var(--dim)}
+.daypick button[aria-selected="true"]{border-color:var(--yellow);color:var(--yellow)}
+.erow{display:grid;grid-template-columns:92px 92px minmax(0,1fr) 120px 84px auto;gap:6px;align-items:center;margin-bottom:6px}
+.erow input,.erow select{width:100%;padding:7px 8px}
+.ehead{font-size:11px;color:var(--dim);font-family:var(--f-display);letter-spacing:.06em}
+.rules{font-size:14px;color:var(--dim);max-width:70ch}
+.rules li{margin-bottom:4px}
+.rules b{color:var(--fg)}
+
+/* Overlays */
+#toasts{position:fixed;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none;max-width:calc(100% - 32px)}
+.toast{background:#000;border:2px solid var(--tc,var(--cyan));padding:10px 12px;display:flex;gap:10px;align-items:center;max-width:340px;box-shadow:0 0 18px rgba(0,0,0,.6);animation:tin .25s steps(4)}
+.toast img{width:36px;height:36px;image-rendering:pixelated;flex:none}
+.toast b{display:block;font-family:var(--f-display);font-size:8px;letter-spacing:.08em;color:var(--tc,var(--cyan));margin-bottom:4px;line-height:1.4}
+.toast span{font-size:13px}
+@keyframes tin{from{transform:translateX(30px);opacity:0}}
+.pop{position:fixed;z-index:45;pointer-events:none;font-family:var(--f-display);font-size:14px;color:var(--yellow);text-shadow:2px 2px 0 #000;animation:popup 1.1s ease-out forwards;white-space:nowrap}
+.pop.sm{font-size:9px;color:var(--pink)}
+@keyframes popup{0%{transform:translate(-50%,0) scale(.6);opacity:0}15%{transform:translate(-50%,-10px) scale(1.15);opacity:1}100%{transform:translate(-50%,-70px) scale(1);opacity:0}}
+.banner{position:fixed;inset:0;z-index:55;display:grid;place-items:center;background:rgba(10,7,24,.78);text-align:center;padding:24px}
+.banner h1{font-family:var(--f-display);font-size:clamp(22px,6vw,44px);line-height:1.3;margin:0;color:var(--yellow);text-shadow:4px 4px 0 var(--pink),0 0 30px rgba(255,211,25,.6);animation:blink .5s steps(2) 4}
+.banner p{font-family:var(--f-display);font-size:10px;color:var(--cyan);margin:18px 0 0;line-height:1.8}
+.banner img{width:96px;height:96px;image-rendering:pixelated;margin-bottom:18px}
+@keyframes blink{50%{opacity:.35}}
+.loading{min-height:50vh;display:grid;place-items:center;text-align:center}
+.loading b{font-family:var(--f-display);font-size:14px;color:var(--yellow);animation:blink 1s steps(2) infinite}
+.note{font-size:13px;color:var(--dim)}
+
+@media (max-width:900px){.grid-today{grid-template-columns:minmax(0,1fr)} .hud{grid-template-columns:1fr auto} .brand{display:none} .counters{grid-column:1/-1;justify-content:space-between} .ctr{flex:1;min-width:0}}
+@media (max-width:640px){.erow{grid-template-columns:1fr 1fr;padding-bottom:10px;border-bottom:2px solid var(--line)} .erow .ename{grid-column:1/-1;order:-1} .ehead{display:none}
+  .row{grid-template-columns:52px 5px minmax(0,1fr);} .row .act{grid-column:1/-1;width:100%}
+  .big-count{font-size:52px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="crt" aria-hidden="true"></div>
+<canvas id="fx" aria-hidden="true"></canvas>
+<div class="app" id="app">
+  <header class="hud">
+    <div class="brand">DAILY<span>ARCADE</span></div>
+    <div class="lvl">
+      <div class="lvl-badge">LV<b id="lv">1</b></div>
+      <div class="lvl-meta">
+        <div class="rank" id="rank">ROOKIE</div>
+        <div class="xpbar" role="progressbar" aria-label="XP to next level"><i id="xpfill"></i></div>
+        <div class="xptext" id="xptext">0 / 200 XP</div>
+      </div>
+    </div>
+    <div class="counters">
+      <div class="ctr score"><small>SCORE</small><b id="c-score">0</b></div>
+      <div class="ctr streak"><small>STREAK</small><b id="c-streak">0</b></div>
+      <div class="ctr freeze"><small>FREEZE</small><b id="c-freeze">0</b></div>
+      <div class="ctr combo"><small>COMBO</small><b id="c-combo">x0</b></div>
+      <button class="iconbtn" id="mute" aria-pressed="true" title="Sound on/off">SFX ON</button>
+    </div>
+  </header>
+  <nav class="tabs" role="tablist" id="tabs">
+    <button role="tab" data-tab="today" aria-selected="true">TODAY</button>
+    <button role="tab" data-tab="week">WEEK</button>
+    <button role="tab" data-tab="bosses">BOSSES</button>
+    <button role="tab" data-tab="loot">LOOT</button>
+    <button role="tab" data-tab="trophies">TROPHIES</button>
+    <button role="tab" data-tab="edit">EDIT ROUTINE</button>
+  </nav>
+  <main id="view"><div class="loading"><div><b>INSERT COIN</b><p class="note">Loading your save file…</p></div></div></main>
+</div>
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+/* ============ constants ============ */
+const GRACE = 60;              // minutes after end that still count as on time
+const CLEAR_RATIO = 0.8;       // share of tasks on time to clear a day
+const MAX_FREEZE = 3;
+const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+const KINDS = {wake:'Wake',sleep:'Sleep',study:'Study',gym:'Gym',pt:'Study / PT',lecture:'Lecture',lab:'Lab',tut:'Tutorial',work:'Work',quest:'Quest',other:'Other'};
+const RANKS = [[1,'ROOKIE'],[3,'BUTTON MASHER'],[5,'COMBO STARTER'],[8,'ARCADE REGULAR'],[12,'HIGH SCORER'],[16,'SPEEDRUNNER'],[20,'BOSS HUNTER'],[25,'GRANDMASTER'],[30,'FINAL BOSS']];
+const RARITY = {common:{c:'#9aa7c7',xp:10,label:'COMMON'},rare:{c:'#2de2e6',xp:30,label:'RARE'},epic:{c:'#c86bff',xp:80,label:'EPIC'},legendary:{c:'#ffd319',xp:250,label:'LEGENDARY'}};
+const ADJ = {common:['Pixel','Scuffed','Lo-Fi','Tiny','Bit'],rare:['Turbo','Neon','Hyper','Chrome','Glitch'],epic:['Quantum','Plasma','Mega','Phantom','Ultra'],legendary:['Golden','Mythic','Omega','Cosmic','Eternal']};
+const NOUN = ['Cartridge','Joystick','Token','Crystal','Invader','Floppy','Visor','Coil','Core','Gem','Cassette','Rocket','Shield','Key','Orb'];
+
+const ACH = [
+  {id:'first',name:'First Blood',desc:'Complete your first task',t:p=>st(p,'done')>=1},
+  {id:'early',name:'Early Bird',desc:'Wake up on time 7 times',t:p=>st(p,'wake')>=7},
+  {id:'lights',name:'Lights Out',desc:'Go to sleep on time 7 times',t:p=>st(p,'sleep')>=7},
+  {id:'combo5',name:'Combo x5',desc:'Five on-time tasks in a row',t:p=>st(p,'maxCombo')>=5},
+  {id:'combo10',name:'Combo x10',desc:'Ten on-time tasks in a row',t:p=>st(p,'maxCombo')>=10},
+  {id:'gym10',name:'Iron Gregory',desc:'Finish 10 gym sessions',t:p=>st(p,'gym')>=10},
+  {id:'study25',name:'Scholar',desc:'Clear 25 study blocks',t:p=>st(p,'study')>=25},
+  {id:'lect20',name:'Front Row',desc:'Attend 20 lectures, labs or tutorials',t:p=>st(p,'lecture')>=20},
+  {id:'weekend4',name:'Weekend Warrior',desc:'Clear 4 weekend work shifts',t:p=>st(p,'weekendWork')>=4},
+  {id:'clear1',name:'Stage Clear',desc:'Clear a day (80% on time)',t:p=>st(p,'clears')>=1},
+  {id:'perfect',name:'Perfect Run',desc:'Every task of a day on time',t:p=>st(p,'perfect')>=1},
+  {id:'streak3',name:'Hat Trick',desc:'3-day streak',t:p=>p.best>=3},
+  {id:'streak7',name:'Full Week',desc:'7-day streak',t:p=>p.best>=7},
+  {id:'streak30',name:'Unstoppable',desc:'30-day streak',t:p=>p.best>=30},
+  {id:'lv5',name:'Level 5',desc:'Reach level 5',t:p=>levelInfo(p.xp).L>=5},
+  {id:'lv10',name:'Level 10',desc:'Reach level 10',t:p=>levelInfo(p.xp).L>=10},
+  {id:'lv25',name:'Level 25',desc:'Reach level 25',t:p=>levelInfo(p.xp).L>=25},
+  {id:'boss1',name:'Boss Slayer',desc:'Defeat a boss',t:p=>st(p,'bossKills')>=1},
+  {id:'boss5',name:'Raid Leader',desc:'Defeat 5 bosses',t:p=>st(p,'bossKills')>=5},
+  {id:'loot10',name:'Collector',desc:'Collect 10 loot items',t:p=>st(p,'loot')>=10},
+  {id:'legend',name:'Legendary',desc:'Find a legendary drop',t:p=>st(p,'legendary')>=1},
+];
+function st(p,k){return (p.stats&&p.stats[k])||0}
+
+/* ============ helpers ============ */
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2,'0');
+const dkey = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const fromKey = k => { const [y,m,d]=k.split('-').map(Number); return new Date(y,m-1,d); };
+const addDays = (k,n) => { const d=fromKey(k); d.setDate(d.getDate()+n); return dkey(d); };
+const toMin = s => { const [h,m]=String(s).split(':').map(Number); return h*60+(m||0); };
+const fmtMin = m => `${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;
+const dayIdx = d => (d.getDay()+6)%7;
+const nowMin = () => { const d=new Date(); return d.getHours()*60+d.getMinutes()+d.getSeconds()/60; };
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
+const clone = o => JSON.parse(JSON.stringify(o));
+const fmtDur = mins => { const s=Math.max(0,Math.round(mins*60)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return h? `${h}:${pad(m)}:${pad(x)}` : `${pad(m)}:${pad(x)}`; };
+function levelInfo(xp){ let L=1, need=200, acc=0; while(xp>=acc+need){acc+=need; L++; need=200+75*(L-1);} return {L, into:xp-acc, need}; }
+function rankFor(L){ let r=RANKS[0][1]; for(const [l,n] of RANKS) if(L>=l) r=n; return r; }
+
+/* ============ storage (db when available, else this browser) ============ */
+const Store = {
+  db:null, q:{},
+  async init(){
+    if(window.claude && typeof window.claude.use==='function'){
+      try{ this.db = await window.claude.use('db'); }catch(e){ this.db=null; }
+    }
+  },
+  ref(path){ return this.db.doc(path); },
+  async get(path){
+    if(this.db){ const s=await this.ref(path).get(); return s.exists? clone(s.data()) : null; }
+    try{ const v=localStorage.getItem('arcade:'+path); return v? JSON.parse(v):null; }catch(e){ return null; }
+  },
+  set(path,data){
+    const run = async()=>{
+      if(this.db) return this.ref(path).set(data);
+      try{ localStorage.setItem('arcade:'+path, JSON.stringify(data)); }catch(e){}
+    };
+    const p=(this.q[path]||Promise.resolve()).then(run).catch(e=>{ console.warn('save failed',path,e); toast('SAVE FAILED','Could not save. Check your connection and try again.','var(--red)'); });
+    this.q[path]=p; return p;
+  },
+  async del(path){
+    if(this.db) return this.ref(path).delete();
+    try{ localStorage.removeItem('arcade:'+path);}catch(e){}
+  },
+  async list(coll){
+    if(this.db){ const s=await this.db.collection(coll).get(); return s.docs.map(d=>({id:d.id,...clone(d.data())})); }
+    const out=[]; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k.startsWith('arcade:'+coll+'/')){ const id=k.slice(('arcade:'+coll+'/').length); if(!id.includes('/')) out.push({id,...JSON.parse(localStorage.getItem(k))}); } } }catch(e){}
+    return out;
+  },
+  async daysSince(fromKeyStr){
+    if(this.db){ const s=await this.db.collection('days').where('date','>=',fromKeyStr).get(); return s.docs.map(d=>clone(d.data())); }
+    return (await this.list('days')).filter(d=>d.date>=fromKeyStr);
+  },
+  watch(path,cb){ if(!this.db) return ()=>{}; return this.ref(path).onSnapshot(s=>cb(s.exists?clone(s.data()):null), e=>console.warn(e)); },
+  watchColl(coll,cb){ if(!this.db) return ()=>{}; return this.db.collection(coll).onSnapshot(s=>cb(s.docs.map(d=>({id:d.id,...clone(d.data())}))), e=>console.warn(e)); }
+};
+
+/* ============ state ============ */
+const S = { profile:null, schedule:[], today:{done:{}}, todayKey:dkey(new Date()), oneoffs:[], bosses:[], week:{}, tab:'today', editDay:dayIdx(new Date()), draft:null, dirty:false, unsubToday:null };
+let muted = false; try{ muted = localStorage.getItem('arcade:muted')==='1'; }catch(e){}
+
+function newProfile(){ const t=dkey(new Date()); return {created:t, xp:0, freezes:1, streak:0, best:0, lastEval:addDays(t,-1), items:[], ach:{}, stats:{}}; }
+
+/* ============ tasks & timing ============ */
+function tasksFor(key){
+  const di = dayIdx(fromKey(key));
+  const out = S.schedule.filter(b=>b.day===di).map(b=>({key:b.id,title:b.title,kind:b.kind,loc:b.loc||'',start:b.start,end:b.end||b.start,mult:b.mult||1}));
+  for(const o of S.oneoffs) if(o.date===key) out.push({key:'o:'+o.id,title:o.title,kind:'quest',loc:'',start:o.start||null,end:o.end||o.start||null,mult:o.mult||1,oneoff:true});
+  return out.sort((a,b)=>(a.start==null?9999:toMin(a.start))-(b.start==null?9999:toMin(b.start)));
+}
+function timing(t){
+  if(t.start==null) return {s:0,e:1440,unlock:0,due:1440,point:false,anytime:true};
+  const s=toMin(t.start), e=toMin(t.end||t.start), point=e<=s;
+  const unlock = point ? s-15 : s;
+  const due = (point? s : e) + GRACE;
+  return {s,e:point?s:e,unlock,due,point};
+}
+function status(t, nm=nowMin(), day=S.today){
+  const d = day.done && day.done[t.key];
+  if(d) return d.onTime? 'done':'late-done';
+  const tm=timing(t);
+  if(nm < tm.unlock) return nm>=tm.s ? 'live' : 'locked';
+  if(nm <= tm.due) return 'ready';
+  return 'late';
+}
+function baseXP(t){
+  const tm=timing(t); let b;
+  if(tm.anytime) b=30; else if(tm.point) b=25; else b=Math.max(15, Math.round((tm.e-tm.s)/60*15));
+  const k = {lecture:1.25,lab:1.25,tut:1.25}[t.kind]||1;
+  return Math.round(b*k*(t.mult||1));
+}
+function dayScore(key, day){
+  const tasks=tasksFor(key); const n=tasks.length; const need=Math.ceil(n*CLEAR_RATIO);
+  let on=0, late=0; for(const t of tasks){ const d=day&&day.done&&day.done[t.key]; if(d){ d.onTime?on++:late++; } }
+  return {n,need,on,late,cleared:n>0&&on>=need,perfect:n>0&&on===n};
+}
+
+/* ============ sound ============ */
+const Sfx = {
+  ctx:null,
+  ensure(){ if(!this.ctx){ try{ this.ctx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(this.ctx&&this.ctx.state==='suspended') this.ctx.resume(); return this.ctx; },
+  tone(f,d=.08,type='square',vol=.06,when=0,slideTo){
+    if(muted) return; const c=this.ensure(); if(!c) return;
+    const t=c.currentTime+when, o=c.createOscillator(), g=c.createGain();
+    o.type=type; o.frequency.setValueAtTime(f,t); if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo,t+d);
+    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(.0001,t+d);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t+d+.02);
+  },
+  noise(d=.15,vol=.08,when=0){ if(muted) return; const c=this.ensure(); if(!c) return; const b=c.createBuffer(1,c.sampleRate*d,c.sampleRate); const a=b.getChannelData(0); for(let i=0;i<a.length;i++) a[i]=(Math.random()*2-1)*(1-i/a.length); const s=c.createBufferSource(), g=c.createGain(); g.gain.value=vol; s.buffer=b; s.connect(g).connect(c.destination); s.start(c.currentTime+when); },
+  seq(notes,step=.07,type='square',vol=.06){ notes.forEach((f,i)=>f&&this.tone(f,step*1.2,type,vol,i*step)); },
+  complete(combo){ const up = Math.min(combo,8)*40; this.seq([523+up,659+up,784+up,1047+up],.06); },
+  late(){ this.seq([392,330,392],.08,'triangle',.08); },
+  locked(){ this.tone(110,.18,'sawtooth',.05); this.tone(98,.18,'sawtooth',.05,.09); },
+  coin(){ this.tone(988,.06,'square',.05); this.tone(1319,.25,'square',.05,.06); },
+  loot(r){ const base={common:660,rare:784,epic:880,legendary:1047}[r]; const n=r==='legendary'?8:r==='epic'?6:4; for(let i=0;i<n;i++) this.tone(base*Math.pow(1.122,i),.09,'triangle',.07,i*.05); },
+  levelup(){ this.seq([523,523,523,698,0,880,0,1047,1047],.09,'square',.07); },
+  clear(){ this.seq([392,523,659,784,659,784,1047],.1,'square',.07); },
+  hit(){ this.noise(.12,.1); this.tone(140,.15,'square',.07,0,60); },
+  bossDown(){ this.noise(.5,.12); this.seq([196,0,262,330,392,523],.1,'square',.07); }
+};
+
+/* ============ pixel sprites ============ */
+const spriteCache = {};
+function hash(str){ let h=2166136261; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+function sprite(seed,color,size=10){
+  const k=seed+color+size; if(spriteCache[k]) return spriteCache[k];
+  let h=hash(seed); const rnd=()=>{ h^=h<<13; h^=h>>>17; h^=h<<5; return ((h>>>0)%1000)/1000; };
+  const c=document.createElement('canvas'); const px=4; c.width=c.height=size*px; const g=c.getContext('2d');
+  const half=Math.ceil(size/2);
+  for(let y=1;y<size-1;y++) for(let x=0;x<half;x++){
+    const edge = x===0 ? .25 : .55;
+    if(rnd()<edge){ const shade = rnd()<.18 ? '#ffffff' : color; g.fillStyle=shade; g.fillRect(x*px,y*px,px,px); g.fillRect((size-1-x)*px,y*px,px,px); }
+  }
+  g.fillStyle='#0a0718'; const ey=2+Math.floor(rnd()*3), ex=1+Math.floor(rnd()*(half-2)); g.fillRect(ex*px,ey*px,px,px); g.fillRect((size-1-ex)*px,ey*px,px,px);
+  return spriteCache[k]=c.toDataURL();
+}
+
+/* ============ fx ============ */
+const FX = {
+  c:null,g:null,parts:[],running:false,
+  init(){ this.c=$('#fx'); this.g=this.c.getContext('2d'); const rs=()=>{ this.c.width=innerWidth*devicePixelRatio; this.c.height=innerHeight*devicePixelRatio; }; rs(); addEventListener('resize',rs); },
+  reduced(){ return matchMedia('(prefers-reduced-motion: reduce)').matches; },
+  burst(x,y,colors,n=40,speed=7){
+    if(this.reduced()) n=Math.min(n,8);
+    for(let i=0;i<n;i++){ const a=Math.random()*Math.PI*2, v=(.4+Math.random())*speed; this.parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-3,life:1,c:colors[i%colors.length],s:3+Math.floor(Math.random()*4)}); }
+    if(!this.running){ this.running=true; requestAnimationFrame(()=>this.loop()); }
+  },
+  loop(){
+    const g=this.g, r=devicePixelRatio; g.clearRect(0,0,this.c.width,this.c.height);
+    this.parts=this.parts.filter(p=>p.life>0);
+    for(const p of this.parts){ p.x+=p.vx; p.y+=p.vy; p.vy+=.28; p.vx*=.98; p.life-=.018; g.globalAlpha=Math.max(0,p.life); g.fillStyle=p.c; g.fillRect(Math.round(p.x*r),Math.round(p.y*r),p.s*r,p.s*r); }
+    g.globalAlpha=1;
+    if(this.parts.length) requestAnimationFrame(()=>this.loop()); else { this.running=false; g.clearRect(0,0,this.c.width,this.c.height); }
+  },
+  pop(x,y,text,cls=''){ const el=document.createElement('div'); el.className='pop '+cls; el.textContent=text; el.style.left=x+'px'; el.style.top=y+'px'; document.body.appendChild(el); setTimeout(()=>el.remove(),1200); },
+  shake(){ if(this.reduced()) return; const a=$('#app'); a.classList.remove('shake'); void a.offsetWidth; a.classList.add('shake'); },
+  banner(title,sub,img,ms=2200){ const b=document.createElement('div'); b.className='banner'; b.innerHTML=`<div>${img?`<img src="${img}" alt="">`:''}<h1>${esc(title)}</h1>${sub?`<p>${esc(sub)}</p>`:''}</div>`; b.addEventListener('click',()=>b.remove()); document.body.appendChild(b); setTimeout(()=>b.remove(),ms); }
+};
+function toast(title,text,color='var(--cyan)',img){
+  const el=document.createElement('div'); el.className='toast'; el.style.setProperty('--tc',color);
+  el.innerHTML=`${img?`<img src="${img}" alt="">`:''}<div><b>${esc(title)}</b><span>${esc(text)}</span></div>`;
+  $('#toasts').appendChild(el); setTimeout(()=>el.remove(),3800);
+}
+
+/* ============ game logic ============ */
+function saveProfile(){ return Store.set('game/profile', S.profile); }
+function saveToday(){ S.today.date=S.todayKey; const sc=dayScore(S.todayKey,S.today); S.today.total=sc.n; S.today.cleared=sc.cleared; return Store.set('days/'+S.todayKey, S.today); }
+function bump(k,n=1){ S.profile.stats=S.profile.stats||{}; S.profile.stats[k]=(S.profile.stats[k]||0)+n; }
+
+function addXP(n){
+  const before=levelInfo(S.profile.xp).L; S.profile.xp+=n; const after=levelInfo(S.profile.xp).L;
+  if(after>before){ setTimeout(()=>{ Sfx.levelup(); FX.banner('LEVEL '+after, rankFor(after), null, 2400); FX.burst(innerWidth/2,innerHeight/2,['#ffd319','#ff3ea5','#2de2e6'],90,10); },650); }
+}
+
+function rollLoot(onTime, force){
+  const chance = force? 1 : (onTime? .35 : .12);
+  if(Math.random()>chance) return null;
+  const r=Math.random()*100;
+  const rar = force==='boss' ? (r<15?'legendary':'epic') : force ? (r<70?'rare':r<95?'epic':'legendary') : (r<2?'legendary':r<12?'epic':r<40?'rare':'common');
+  const name = ADJ[rar][Math.floor(Math.random()*5)]+' '+NOUN[Math.floor(Math.random()*NOUN.length)];
+  return {id:uid(), name, rarity:rar, at:Date.now()};
+}
+function grantLoot(item){
+  if(!item) return;
+  const R=RARITY[item.rarity]; S.profile.items=(S.profile.items||[]); S.profile.items.unshift(item); if(S.profile.items.length>300) S.profile.items.length=300;
+  bump('loot'); if(item.rarity==='legendary') bump('legendary');
+  let extra='+'+R.xp+' XP';
+  addXP(R.xp);
+  if(item.rarity==='legendary' || (item.rarity==='epic' && Math.random()<.25)){ if(S.profile.freezes<MAX_FREEZE){ S.profile.freezes++; extra+=' · +1 streak freeze'; } }
+  const img=sprite(item.id,R.c);
+  setTimeout(()=>{ Sfx.loot(item.rarity); toast(R.label+' DROP', item.name+'  '+extra, R.c, img); if(item.rarity==='legendary') FX.banner('LEGENDARY!', item.name, img, 2200); },350);
+}
+function checkAch(){
+  S.profile.ach=S.profile.ach||{}; let n=0;
+  for(const a of ACH){ if(!S.profile.ach[a.id] && a.t(S.profile)){ S.profile.ach[a.id]=Date.now(); n++; S.profile.xp+=50;
+    setTimeout(()=>{ Sfx.coin(); toast('TROPHY UNLOCKED', a.name+' · +50 XP', 'var(--yellow)', sprite('ach'+a.id,'#ffd319')); }, 700+n*400); } }
+}
+
+function complete(key, el){
+  Sfx.ensure();
+  const tasks=tasksFor(S.todayKey); const t=tasks.find(x=>x.key===key); if(!t) return;
+  const nm=nowMin(); const s=status(t,nm);
+  const rect = el ? el.getBoundingClientRect() : {left:innerWidth/2,top:innerHeight/2,width:0,height:0};
+  const cx=rect.left+rect.width/2, cy=rect.top+rect.height/2;
+  if(s==='done'||s==='late-done') return;
+  if(s==='locked'||s==='live'){
+    Sfx.locked(); FX.shake(); const tm=timing(t);
+    FX.pop(cx,cy-10,'UNLOCKS '+fmtMin(Math.max(0,tm.unlock)),'sm'); return;
+  }
+  const onTime = s==='ready';
+  // combo: breaks on a late completion, or if any task expired unfinished since the last completion
+  const lastAt = S.today.lastAtMin ?? -1;
+  const broken = tasks.some(x=>x.key!==key && !S.today.done[x.key] && !timing(x).anytime && timing(x).due>lastAt && timing(x).due<nm);
+  let combo = S.today.combo||0;
+  combo = onTime ? (broken?0:combo)+1 : 0;
+  const mult = onTime ? Math.min(2, 1+.1*(combo-1)) : 1;
+  const xp = Math.round(baseXP(t) * (onTime?1.25:.5) * mult);
+  const before = dayScore(S.todayKey,S.today);
+  S.today.done[key]={at:Date.now(), onTime, xp, title:t.title};
+  S.today.combo=combo; S.today.lastAtMin=nm;
+  // stats
+  bump('done'); bump(onTime?'onTime':'late');
+  if(onTime){
+    if(t.kind==='wake') bump('wake'); if(t.kind==='sleep') bump('sleep');
+    if(t.kind==='gym') bump('gym'); if(t.kind==='study'||t.kind==='pt') bump('study');
+    if(['lecture','lab','tut'].includes(t.kind)) bump('lecture');
+    if(t.kind==='work' && dayIdx(new Date())>=5) bump('weekendWork');
+  }
+  if(combo>st(S.profile,'maxCombo')) S.profile.stats.maxCombo=combo;
+  addXP(xp);
+  // effects
+  if(onTime){ Sfx.complete(combo); FX.burst(cx,cy,['#ff3ea5','#2de2e6','#ffd319','#7dff8a'],46,8); FX.pop(cx,cy-20,'+'+xp+' XP'); if(combo>=2) setTimeout(()=>FX.pop(cx,cy-50,'COMBO x'+combo,'sm'),180); else FX.pop(cx,cy-50,'ON TIME!','sm'); if(combo>=5) FX.shake(); }
+  else { Sfx.late(); FX.burst(cx,cy,['#ff8a3d','#ffd319'],18,5); FX.pop(cx,cy-20,'+'+xp+' XP'); FX.pop(cx,cy-50,'LATE · HALF XP','sm'); }
+  // loot
+  grantLoot(rollLoot(onTime,false));
+  // stage clear / perfect
+  const after = dayScore(S.todayKey,S.today);
+  if(!before.cleared && after.cleared){ bump('clears'); S.profile.xp+=100; setTimeout(()=>{ Sfx.clear(); FX.banner('STAGE CLEAR','+100 XP · streak locked in for today'); FX.burst(innerWidth/2,innerHeight/3,['#7dff8a','#ffd319','#2de2e6'],120,11); },900); }
+  if(!before.perfect && after.perfect){ bump('perfect'); setTimeout(()=>{ toast('PERFECT RUN','Every task on time today. Bonus loot incoming!','var(--lime)'); grantLoot(rollLoot(true,true)); },2600); }
+  checkAch();
+  saveToday(); saveProfile();
+  renderHUD(); if(S.tab==='today') renderToday(true);
+}
+
+function undo(key){
+  const d=S.today.done[key]; if(!d) return;
+  S.profile.xp=Math.max(0,S.profile.xp-(d.xp||0)); delete S.today.done[key];
+  bump('done',-1); bump(d.onTime?'onTime':'late',-1);
+  saveToday(); saveProfile(); renderHUD(); renderToday(true); toast('UNDONE', d.title+' · -'+d.xp+' XP','var(--dim)');
+}
+
+async function evaluateStreak(){
+  const p=S.profile; const yesterday=addDays(S.todayKey,-1);
+  if(p.lastEval>=yesterday) return;
+  const start=addDays(p.lastEval,1);
+  const docs=await Store.daysSince(start); const map={}; docs.forEach(d=>map[d.date]=d);
+  let k=start; const msgs=[];
+  while(k<=yesterday){
+    const sc=dayScore(k,map[k]||{done:{}});
+    if(sc.n>0){
+      if(sc.cleared){ p.streak++; if(p.streak>p.best) p.best=p.streak; if(p.streak%7===0 && p.freezes<MAX_FREEZE){ p.freezes++; msgs.push(['FREEZE EARNED','7 days in a row. +1 streak freeze.','var(--cyan)']); } }
+      else if(p.freezes>0 && p.streak>0){ p.freezes--; msgs.push(['FREEZE USED',`${DAYS[dayIdx(fromKey(k))]} ${k.slice(5)} wasn't cleared. Your ${p.streak}-day streak is safe.`,'var(--cyan)']); }
+      else if(p.streak>0){ msgs.push(['STREAK RESET',`${DAYS[dayIdx(fromKey(k))]} wasn't cleared. New run starts today.`,'var(--orange)']); p.streak=0; }
+    }
+    p.lastEval=k; k=addDays(k,1);
+  }
+  checkAch(); await saveProfile();
+  msgs.slice(-3).forEach((m,i)=>setTimeout(()=>toast(...m),600+i*500));
+}
+
+/* ============ rendering ============ */
+function renderHUD(){
+  const p=S.profile; if(!p) return; const li=levelInfo(p.xp);
+  $('#lv').textContent=li.L; $('#rank').textContent=rankFor(li.L);
+  $('#xpfill').style.width=(li.into/li.need*100).toFixed(1)+'%';
+  $('#xptext').textContent=`${li.into} / ${li.need} XP to level ${li.L+1}`;
+  $('#c-score').textContent=p.xp.toLocaleString();
+  const sc=dayScore(S.todayKey,S.today);
+  $('#c-streak').textContent=p.streak+(sc.cleared?1:0);
+  $('#c-freeze').textContent=p.freezes;
+  $('#c-combo').textContent='x'+(S.today.combo||0);
+  $('#mute').textContent=muted?'SFX OFF':'SFX ON'; $('#mute').setAttribute('aria-pressed',String(!muted));
+}
+
+function actLabel(s,t){
+  const tm=timing(t);
+  return {locked:'LOCKED<br>'+(tm.anytime?'':fmtMin(Math.max(0,tm.unlock))), live:'IN PROGRESS<br>OPENS '+fmtMin(tm.unlock), ready:'COMPLETE<br>+'+Math.round(baseXP(t)*1.25)+' XP', late:'LATE<br>+'+Math.round(baseXP(t)*.5)+' XP', done:'CLEARED', 'late-done':'DONE LATE'}[s];
+}
+function pickNow(tasks,nm){
+  const st=tasks.map(t=>({t,s:status(t,nm)}));
+  return st.find(x=>x.s==='ready' && !timing(x.t).anytime) || st.find(x=>x.s==='live') || st.find(x=>x.s==='locked') || st.find(x=>x.s==='ready') || st.find(x=>x.s==='late') || null;
+}
+function nowCardHTML(tasks,nm){
+  const pick=pickNow(tasks,nm);
+  if(!tasks.length) return `<section class="panel now"><div class="tag">NO STAGES TODAY</div><h2>Free play</h2><p class="meta">Nothing is scheduled. Add a quest below or set up your routine in Edit Routine.</p></section>`;
+  if(!pick) return `<section class="panel now"><div class="tag">ALL STAGES DONE</div><h2>GAME OVER… in a good way</h2><p class="meta">Everything on today's list is finished. Rest up for tomorrow's run.</p></section>`;
+  const {t,s}=pick; const tm=timing(t);
+  let countLabel='', target=null, cls='wait', btn='';
+  if(s==='locked'){ target=tm.s; countLabel='UNTIL START'; btn='LOCKED · OPENS '+fmtMin(Math.max(0,tm.unlock)); }
+  else if(s==='live'){ target=tm.unlock; countLabel='UNTIL YOU CAN CLAIM IT'; btn='IN PROGRESS'; }
+  else if(s==='ready'){ target=tm.anytime?null:tm.due; countLabel='ON-TIME WINDOW LEFT'; cls='ready'; btn='COMPLETE · +'+Math.round(baseXP(t)*1.25)+' XP'; }
+  else { cls='late'; btn='COMPLETE LATE · +'+Math.round(baseXP(t)*.5)+' XP'; }
+  const when = tm.anytime ? 'Any time today' : tm.point ? fmtMin(tm.s) : `${fmtMin(tm.s)} – ${fmtMin(tm.e)}`;
+  return `<section class="panel now">
+    <div class="tag">${s==='ready'?'▶ READY TO CLAIM':s==='live'?'● NOW PLAYING':s==='late'?'! OVERTIME':'NEXT STAGE'}</div>
+    <h2>${esc(t.title)}</h2>
+    <div class="meta">${when}${t.loc?' · '+esc(t.loc):''}</div>
+    ${target!=null?`<div class="big-count" data-target="${target}">--:--<small>${countLabel}</small></div>`:''}
+    <div class="chips"><span class="chip" style="color:var(--k-${t.kind})">${esc(KINDS[t.kind]||t.kind)}</span>${t.mult>1?`<span class="chip" style="color:var(--yellow)">x${t.mult} XP</span>`:''}${(S.today.combo||0)>=2&&s==='ready'?`<span class="chip" style="color:var(--pink)">COMBO x${S.today.combo} → x${Math.min(2,1+.1*S.today.combo).toFixed(1)}</span>`:''}</div>
+    <button class="start-btn ${cls}" data-act="complete" data-key="${esc(t.key)}">${btn}</button>
+  </section>`;
+}
+function meterHTML(){
+  const sc=dayScore(S.todayKey,S.today); if(!sc.n) return '';
+  let cells=''; for(let i=0;i<sc.n;i++){ const cls = i<sc.on?'on': i<sc.on+sc.late?'late':''; cells+=`<i class="${cls} ${i===sc.need-1?'goal':''}"></i>`; }
+  const left=Math.max(0,sc.need-sc.on);
+  return `<section class="panel"><div class="ptitle"><span>STAGE PROGRESS</span><span>${sc.on}/${sc.n} ON TIME</span></div><div class="meter">${cells}</div>
+  <p class="meter-note">${sc.cleared? (sc.perfect?'Perfect run. Every stage on time.':'Stage cleared. Today counts toward your streak.') : `${left} more on time to clear today (yellow marker = ${Math.round(CLEAR_RATIO*100)}%).`}</p></section>`;
+}
+function trackHTML(tasks,nm){
+  if(!tasks.length) return `<div class="empty"><b>NO STAGES LOADED</b>Your routine appears here once it's saved. Open Edit Routine to add blocks.</div>`;
+  return `<div class="track">${tasks.map(t=>{ const s=status(t,nm); const tm=timing(t); const x=baseXP(t);
+    return `<div class="row ${s==='late-done'?'done':s}" style="--kc:var(--k-${t.kind})">
+      <div class="t">${tm.anytime?'ANY':fmtMin(tm.s)}${!tm.point&&!tm.anytime?`<span>${fmtMin(tm.e)}</span>`:''}</div><div class="bar"></div>
+      <div><div class="ti">${esc(t.title)}</div><div class="sub">${esc(KINDS[t.kind]||t.kind)}${t.loc?' · '+esc(t.loc):''} · ${x} XP${t.mult>1?' (x'+t.mult+')':''}${S.today.done[t.key]?' · earned '+S.today.done[t.key].xp:''}</div></div>
+      <button class="act ${s}" data-act="${s==='done'||s==='late-done'?'undo':'complete'}" data-key="${esc(t.key)}" ${s==='done'||s==='late-done'?'title="Tap to undo"':''}>${actLabel(s,t)}</button>
+    </div>`; }).join('')}</div>`;
+}
+function renderToday(partial){
+  const tasks=tasksFor(S.todayKey), nm=nowMin();
+  if(!partial || !$('#now-slot')){
+    $('#view').innerHTML=`<div class="grid-today">
+      <div class="col"><div id="now-slot"></div><div id="meter-slot"></div>
+        <section class="panel"><div class="ptitle">SIDE QUEST</div>
+          <form class="form" id="oneoff-form">
+            <input type="text" id="oo-title" placeholder="e.g. Email tutor about lab report" maxlength="80" required aria-label="Quest name">
+            <input type="time" id="oo-start" aria-label="Start time (optional)">
+            <input type="time" id="oo-end" aria-label="End time (optional)">
+            <label class="toggle"><input type="checkbox" id="oo-star"> x1.5 XP</label>
+            <button class="btn solid" type="submit">ADD</button>
+          </form>
+          <p class="note">Added to today. Leave times empty for an any-time quest.</p>
+        </section></div>
+      <section class="panel"><div class="ptitle"><span>TODAY · ${DAYS[dayIdx(new Date())]} ${S.todayKey.slice(8)}/${S.todayKey.slice(5,7)}</span><span id="clock"></span></div><div id="track-slot"></div></section>
+    </div>`;
+  }
+  $('#now-slot').innerHTML=nowCardHTML(tasks,nm);
+  $('#meter-slot').innerHTML=meterHTML();
+  $('#track-slot').innerHTML=trackHTML(tasks,nm);
+  tickCountdowns();
+}
+
+async function renderWeek(){
+  const today=new Date(); const mon=addDays(S.todayKey,-dayIdx(today));
+  const keys=[...Array(7)].map((_,i)=>addDays(mon,i));
+  await Promise.all(keys.map(async k=>{ if(k===S.todayKey) S.week[k]=S.today; else if(k<S.todayKey && !S.week[k]) S.week[k]=await Store.get('days/'+k)||{done:{}}; }));
+  const H0=5*60, H1=21.5*60, PX=1.6, H=(H1-H0)/60*PX*20;
+  const y=m=>((m-H0)/60)*PX*20;
+  let html=`<section class="panel"><div class="ptitle"><span>THIS WEEK</span><span>${keys[0].slice(5)} → ${keys[6].slice(5)}</span></div><div class="week-wrap"><div class="week"><div></div>`;
+  keys.forEach((k,i)=>html+=`<div class="hd ${k===S.todayKey?'today':''}">${DAYS[i]}</div>`);
+  html+=`<div class="hours" style="height:${H}px">${[5,7,9,11,13,15,17,19,21].map(h=>`<span style="top:${y(h*60)}px">${pad(h)}</span>`).join('')}</div>`;
+  keys.forEach(k=>{
+    const day=S.week[k]||{done:{}}; const past=k<S.todayKey;
+    html+=`<div class="daycol" style="height:${H}px">`+tasksFor(k).filter(t=>t.start!=null).map(t=>{ const tm=timing(t); const d=day.done&&day.done[t.key];
+      const cls=(tm.point?'pt ':'')+(d&&d.onTime?'ok':(past&&!d?'miss':''));
+      return `<div class="blk ${cls}" style="--kc:var(--k-${t.kind});top:${y(tm.s)}px;${tm.point?'':`height:${Math.max(10,y(tm.e)-y(tm.s))}px`}" title="${esc(t.title)} ${fmtMin(tm.s)}${tm.point?'':'–'+fmtMin(tm.e)}">${tm.point?'':esc(t.title)}</div>`; }).join('')+`</div>`;
+  });
+  html+=`</div></div><div class="legend">${['study','gym','pt','lecture','lab','tut','work','wake'].map(k=>`<span style="--kc:var(--k-${k})"><i></i>${KINDS[k]}</span>`).join('')}<span>Striped = cleared on time · Faded = missed</span></div></section>`;
+  const sums=keys.filter(k=>k<=S.todayKey).map(k=>({k,...dayScore(k,S.week[k]||{done:{}})}));
+  html+=`<section class="panel"><div class="ptitle">DAY RESULTS</div><div class="track">${sums.map(s=>`<div class="row" style="--kc:${s.cleared?'var(--lime)':s.k===S.todayKey?'var(--cyan)':'var(--red)'};grid-template-columns:62px 6px minmax(0,1fr) auto"><div class="t">${DAYS[dayIdx(fromKey(s.k))]}</div><div class="bar"></div><div><div class="ti">${s.on}/${s.n} on time${s.late?` · ${s.late} late`:''}</div><div class="sub">Needs ${s.need} to clear</div></div><span class="act ${s.cleared?'done':s.k===S.todayKey?'live':'missed'}">${s.perfect?'PERFECT':s.cleared?'CLEARED':s.k===S.todayKey?'IN PLAY':'FAILED'}</span></div>`).join('')}</div></section>`;
+  if(S.tab==='week') $('#view').innerHTML=html;
+}
+
+function renderBosses(){
+  const alive=S.bosses.filter(b=>!b.defeatedAt), dead=S.bosses.filter(b=>b.defeatedAt);
+  const card=b=>{ const hits=b.steps.filter(s=>s.done).length; return `<section class="panel boss ${b.defeatedAt?'dead':''}">
+    <h3>${b.defeatedAt?'DEFEATED · ':''}${esc(b.name)}</h3>
+    <div class="hp" aria-label="${b.steps.length-hits} of ${b.steps.length} HP left">${b.steps.map(s=>`<i class="${s.done?'gone':''}"></i>`).join('')}</div>
+    <ul class="steps">${b.steps.map((s,i)=>`<li class="${s.done?'hit':''}"><span>${esc(s.t)}</span>${s.done?'<span class="note">HIT</span>':`<button class="btn small" data-act="hit" data-boss="${b.id}" data-i="${i}">HIT</button>`}</li>`).join('')}</ul>
+    <p class="note" style="margin-top:10px">${b.defeatedAt?'Reward claimed.':`Each hit +20 XP · defeat +${100+25*b.steps.length} XP and an epic-or-better drop`}</p>
+    ${b.defeatedAt||hits===0?`<button class="btn small warn" data-act="delboss" data-boss="${b.id}" style="margin-top:6px">REMOVE</button>`:''}
+  </section>`; };
+  $('#view').innerHTML=`<section class="panel"><div class="ptitle">SPAWN A BOSS</div>
+    <form id="boss-form" class="form" style="flex-direction:column;align-items:stretch">
+      <input type="text" id="boss-name" placeholder="Big goal, e.g. Finish Risk Analysis revision" maxlength="80" required aria-label="Boss name">
+      <textarea id="boss-steps" rows="4" placeholder="One step per line: each is a hit&#10;Chapter 1 notes&#10;Chapter 2 notes&#10;Past paper 2024" required aria-label="Steps"></textarea>
+      <div><button class="btn solid" type="submit">SPAWN BOSS</button></div>
+    </form></section>
+    ${alive.length?`<div class="bosses">${alive.map(card).join('')}</div>`:`<div class="empty"><b>NO BOSSES IN THE ARENA</b>Turn a big goal into a boss. Break it into steps and land a hit for each one.</div>`}
+    ${dead.length?`<div class="ptitle" style="margin-top:8px">HALL OF FAME</div><div class="bosses">${dead.map(card).join('')}</div>`:''}`;
+}
+
+function renderLoot(){
+  const items=S.profile.items||[]; const cnt={common:0,rare:0,epic:0,legendary:0}; items.forEach(i=>cnt[i.rarity]++);
+  $('#view').innerHTML=`<section class="panel"><div class="ptitle"><span>LOOT VAULT</span><span>${items.length} ITEMS</span></div>
+    <div class="rates">${Object.entries(RARITY).map(([k,r])=>`<span><b style="color:${r.c}">${r.label}</b> ${cnt[k]} · +${r.xp} XP</span>`).join('')}</div>
+    <p class="note" style="margin:0 0 14px">Drop chance: 35% per on-time task, 12% when late. Epic drops can carry a streak freeze; legendary always does. Perfect days and bosses drop guaranteed loot.</p>
+    ${items.length?`<div class="loot-grid">${items.map(i=>{const R=RARITY[i.rarity]; return `<div class="item" style="--rc:${R.c}"><img src="${sprite(i.id,R.c)}" alt=""><b>${esc(i.name)}</b><small>${R.label}</small></div>`;}).join('')}</div>`:`<div class="empty"><b>VAULT EMPTY</b>Complete tasks on time to roll for drops.</div>`}
+  </section>`;
+}
+function renderTrophies(){
+  const got=S.profile.ach||{}; const n=ACH.filter(a=>got[a.id]).length;
+  const s=S.profile.stats||{};
+  $('#view').innerHTML=`<section class="panel"><div class="ptitle"><span>TROPHY CASE</span><span>${n}/${ACH.length}</span></div>
+    <div class="ach-grid">${ACH.map(a=>`<div class="item ${got[a.id]?'':'locked'}" style="--rc:var(--yellow)"><img src="${sprite('ach'+a.id,'#ffd319')}" alt=""><b>${esc(a.name)}</b><span class="note">${esc(a.desc)}</span><small>${got[a.id]?'UNLOCKED':'LOCKED'}</small></div>`).join('')}</div></section>
+    <section class="panel"><div class="ptitle">HIGH SCORES</div><div class="counters" style="justify-content:flex-start">
+      ${[['TASKS',s.done||0],['ON TIME',s.onTime||0],['BEST STREAK',S.profile.best||0],['MAX COMBO',s.maxCombo||0],['CLEARS',s.clears||0],['BOSSES',s.bossKills||0]].map(([l,v])=>`<div class="ctr"><small>${l}</small><b>${v}</b></div>`).join('')}
+    </div></section>`;
+}
+
+function renderEdit(){
+  if(!S.draft){ S.draft=clone(S.schedule); S.dirty=false; }
+  const rows=S.draft.filter(b=>b.day===S.editDay).sort((a,b)=>toMin(a.start)-toMin(b.start));
+  $('#view').innerHTML=`<section class="panel"><div class="ptitle"><span>EDIT ROUTINE</span><span>${S.dirty?'<span style="color:var(--yellow)">UNSAVED CHANGES</span>':''}</span></div>
+    <div class="daypick" role="tablist">${DAYS.map((d,i)=>`<button data-act="eday" data-i="${i}" aria-selected="${i===S.editDay}">${d}</button>`).join('')}</div>
+    <div class="erow ehead"><span>START</span><span>END</span><span class="ename">NAME</span><span>TYPE</span><span>XP</span><span></span></div>
+    ${rows.map(b=>`<div class="erow" data-id="${b.id}">
+      <input type="time" id="s-${b.id}" data-f="start" value="${b.start}" aria-label="Start">
+      <input type="time" id="e-${b.id}" data-f="end" value="${b.end||b.start}" aria-label="End (same as start for a check-in)">
+      <input type="text" id="n-${b.id}" class="ename" data-f="title" value="${esc(b.title+(b.loc?" · "+b.loc:""))}" aria-label="Name">
+      <select id="k-${b.id}" data-f="kind" aria-label="Type">${Object.entries(KINDS).filter(([k])=>k!=='quest').map(([k,l])=>`<option value="${k}" ${b.kind===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="m-${b.id}" data-f="mult" aria-label="XP multiplier">${[1,1.5,2,3].map(m=>`<option value="${m}" ${(b.mult||1)==m?'selected':''}>x${m}</option>`).join('')}</select>
+      <button class="btn small warn" data-act="edel" data-id="${b.id}" aria-label="Delete">DEL</button>
+    </div>`).join('') || '<div class="empty"><b>EMPTY DAY</b>Add a block below.</div>'}
+    <div class="form" style="margin-top:12px"><button class="btn" data-act="eadd">+ ADD BLOCK</button><button class="btn" data-act="ecopy">COPY DAY TO…</button><select id="copy-to" aria-label="Copy to day">${DAYS.map((d,i)=>`<option value="${i}">${d}</option>`).join('')}</select>
+    <span style="flex:1"></span><button class="btn" data-act="erevert">DISCARD</button><button class="btn solid" data-act="esave">SAVE ROUTINE</button></div>
+    <p class="note" style="margin-top:10px">Set end = start for a check-in task like Wake or Sleep. Location goes after a " · " in the name if you want it shown separately, e.g. "Lec EC4307 · ERB001".</p>
+  </section>
+  <section class="panel"><div class="ptitle">HOW SCORING WORKS</div><ul class="rules">
+    <li><b>Check-ins</b> (Wake, Sleep) open 15 min early and stay on time for ${GRACE} min after.</li>
+    <li><b>Blocks</b> can be claimed any time once they start. On time until ${GRACE} min after the end.</li>
+    <li><b>On time</b>: base XP +25% and combo multiplier up to x2. <b>Late</b> (same day): half XP, combo resets. Nothing is taken away.</li>
+    <li><b>Base XP</b>: 15 per hour (min 15), check-ins 25, lectures/labs/tutorials x1.25, then the block's own multiplier.</li>
+    <li><b>Stage clear</b>: ${Math.round(CLEAR_RATIO*100)}% of a day's tasks on time. Clears build your streak; every 7 days earns a freeze (max ${MAX_FREEZE}). A freeze is used automatically on an uncleared day.</li>
+  </ul></section>`;
+}
+
+function render(){
+  document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.tab===S.tab)));
+  renderHUD();
+  ({today:()=>renderToday(false),week:renderWeek,bosses:renderBosses,loot:renderLoot,trophies:renderTrophies,edit:renderEdit})[S.tab]();
+}
+
+function tickCountdowns(){
+  const nm=nowMin();
+  document.querySelectorAll('[data-target]').forEach(el=>{ const t=+el.dataset.target; const small=el.querySelector('small'); el.firstChild.nodeValue=fmtDur(t-nm); if(small) el.appendChild(small); });
+  const c=$('#clock'); if(c){ const d=new Date(); c.textContent=`${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+}
+
+/* ============ events ============ */
+$('#tabs').addEventListener('click',e=>{ const b=e.target.closest('button[data-tab]'); if(!b) return; if(S.tab==='edit'&&b.dataset.tab!=='edit'&&S.dirty){ toast('UNSAVED','Save or discard your routine edits first.','var(--yellow)'); return; } S.tab=b.dataset.tab; if(S.tab!=='edit') S.draft=null; Sfx.tone(660,.04,'square',.04); render(); });
+$('#mute').addEventListener('click',()=>{ muted=!muted; try{localStorage.setItem('arcade:muted',muted?'1':'0')}catch(e){} renderHUD(); if(!muted) Sfx.coin(); });
+
+$('#view').addEventListener('click',async e=>{
+  const b=e.target.closest('[data-act]'); if(!b) return; const a=b.dataset.act;
+  if(a==='complete') complete(b.dataset.key,b);
+  else if(a==='undo') undo(b.dataset.key);
+  else if(a==='hit') hitBoss(b.dataset.boss,+b.dataset.i,b);
+  else if(a==='delboss'){ S.bosses=S.bosses.filter(x=>x.id!==b.dataset.boss); await Store.del('bosses/'+b.dataset.boss); renderBosses(); }
+  else if(a==='eday'){ S.editDay=+b.dataset.i; renderEdit(); }
+  else if(a==='eadd'){ S.draft.push({id:'b'+uid(),day:S.editDay,start:'12:00',end:'13:00',title:'New block',kind:'study',mult:1}); S.dirty=true; renderEdit(); }
+  else if(a==='edel'){ S.draft=S.draft.filter(x=>x.id!==b.dataset.id); S.dirty=true; renderEdit(); }
+  else if(a==='ecopy'){ const to=+$('#copy-to').value; if(to===S.editDay) return; S.draft=S.draft.filter(x=>x.day!==to).concat(S.draft.filter(x=>x.day===S.editDay).map(x=>({...x,id:'b'+uid(),day:to}))); S.dirty=true; toast('COPIED',`${DAYS[S.editDay]} copied to ${DAYS[to]}. Save to keep it.`); renderEdit(); }
+  else if(a==='erevert'){ S.draft=null; renderEdit(); }
+  else if(a==='esave'){ for(const x of S.draft){ if(!x.end||toMin(x.end)<toMin(x.start)) x.end=x.start; } S.schedule=clone(S.draft); S.dirty=false; await Store.set('game/schedule',{blocks:S.schedule}); Sfx.coin(); toast('SAVED','Routine updated.','var(--lime)'); renderEdit(); }
+});
+$('#view').addEventListener('change',e=>{
+  const row=e.target.closest('.erow'); if(!row||!S.draft) return; const b=S.draft.find(x=>x.id===row.dataset.id); if(!b) return;
+  const f=e.target.dataset.f; let v=e.target.value; if(f==='mult') v=+v;
+  if(f==='title'){ const parts=v.split(' · '); b.title=parts[0].trim(); b.loc=(parts[1]||'').trim(); } else b[f]=v;
+  S.dirty=true; const t=document.querySelector('.ptitle span:last-child'); if(t) t.innerHTML='<span style="color:var(--yellow)">UNSAVED CHANGES</span>';
+});
+$('#view').addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(e.target.id==='oneoff-form'){
+    const title=$('#oo-title').value.trim(); if(!title) return;
+    const start=$('#oo-start').value||null; const end=$('#oo-end').value||start;
+    const o={id:uid(),title,date:S.todayKey,start,end,mult:$('#oo-star').checked?1.5:1};
+    S.oneoffs.push(o); await Store.set('oneoffs/'+o.id,o); Sfx.coin(); e.target.reset(); renderToday(true); renderHUD();
+  }
+  if(e.target.id==='boss-form'){
+    const name=$('#boss-name').value.trim(); const steps=$('#boss-steps').value.split('\n').map(s=>s.trim()).filter(Boolean).slice(0,30);
+    if(!name||!steps.length) return;
+    const b={id:uid(),name,steps:steps.map(t=>({t,done:false})),created:Date.now()};
+    S.bosses.push(b); await Store.set('bosses/'+b.id,b); Sfx.bossDown(); FX.banner('BOSS APPEARS', name.toUpperCase(), sprite('boss'+b.id,'#b07bff',12), 1800); renderBosses();
+  }
+});
+
+function hitBoss(id,i,el){
+  Sfx.ensure(); const b=S.bosses.find(x=>x.id===id); if(!b||b.steps[i].done) return;
+  b.steps[i].done=true; b.steps[i].at=Date.now();
+  const r=el.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2;
+  Sfx.hit(); FX.shake(); FX.burst(cx,cy,['#ff4b5c','#b07bff','#ffd319'],30,7); FX.pop(cx,cy-20,'+20 XP'); addXP(20);
+  if(b.steps.every(s=>s.done)){
+    b.defeatedAt=Date.now(); bump('bossKills'); const bonus=100+25*b.steps.length; addXP(bonus);
+    setTimeout(()=>{ Sfx.bossDown(); FX.banner('BOSS DEFEATED', `${b.name} · +${bonus} XP`, sprite('boss'+b.id,'#7dff8a',12), 2400); FX.burst(innerWidth/2,innerHeight/2,['#7dff8a','#ffd319','#ff3ea5','#2de2e6'],140,12); grantLoot(rollLoot(true,'boss')); },400);
+  }
+  checkAch(); Store.set('bosses/'+b.id,b); saveProfile(); renderHUD(); renderBosses();
+}
+
+/* ============ boot ============ */
+async function loadToday(){
+  S.todayKey=dkey(new Date()); S.today=(await Store.get('days/'+S.todayKey))||{date:S.todayKey,done:{},combo:0}; S.today.done=S.today.done||{};
+  if(S.unsubToday) S.unsubToday();
+  S.unsubToday=Store.watch('days/'+S.todayKey,d=>{ if(d&&d.date===S.todayKey){ d.done=d.done||{}; S.today=d; renderHUD(); if(S.tab==='today') renderToday(true); } });
+}
+async function boot(){
+  FX.init();
+  await Store.init();
+  S.profile=(await Store.get('game/profile'));
+  if(!S.profile){ S.profile=newProfile(); await saveProfile(); }
+  S.profile.stats=S.profile.stats||{}; S.profile.items=S.profile.items||[]; S.profile.ach=S.profile.ach||{};
+  const sch=await Store.get('game/schedule'); S.schedule=(sch&&sch.blocks)||[];
+  S.oneoffs=await Store.list('oneoffs'); S.bosses=(await Store.list('bosses')).sort((a,b)=>a.created-b.created);
+  await loadToday();
+  await evaluateStreak();
+  // prune one-offs older than 14 days
+  const cutoff=addDays(S.todayKey,-14); for(const o of S.oneoffs.filter(o=>o.date<cutoff)) Store.del('oneoffs/'+o.id); S.oneoffs=S.oneoffs.filter(o=>o.date>=cutoff);
+  Store.watch('game/profile',p=>{ if(p){ p.stats=p.stats||{}; p.items=p.items||[]; p.ach=p.ach||{}; S.profile=p; renderHUD(); } });
+  Store.watch('game/schedule',d=>{ if(d&&d.blocks){ S.schedule=d.blocks; if(S.tab==='today') renderToday(true); else if(S.tab==='edit'&&!S.dirty){ S.draft=null; renderEdit(); } } });
+  Store.watchColl('oneoffs',l=>{ S.oneoffs=l.filter(o=>o.date>=cutoff); if(S.tab==='today') renderToday(true); });
+  Store.watchColl('bosses',l=>{ S.bosses=l.sort((a,b)=>a.created-b.created); if(S.tab==='bosses') renderBosses(); });
+  if(!Store.db) setTimeout(()=>toast('LOCAL SAVE','Cloud sync is unavailable in this view, so progress is saved in this browser only.','var(--yellow)'),800);
+  render();
+  let lastFull=Date.now();
+  setInterval(async()=>{
+    if(dkey(new Date())!==S.todayKey){ await loadToday(); S.week={}; await evaluateStreak(); render(); return; }
+    tickCountdowns();
+    if(S.tab==='today' && Date.now()-lastFull>15000){ lastFull=Date.now(); renderToday(true); renderHUD(); }
+  },1000);
+}
+boot();
+</script>
+</body>
+</html>
