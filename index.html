@@ -3,6 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0718">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Arcade">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
 </head>
 <body>
 <title>Daily Arcade</title>
@@ -16,7 +25,7 @@
   color-scheme: dark;
   --bg:#0a0718; --bg2:#120d2a; --panel:#17113a; --panel2:#1f1750; --line:#2f2670; --dim:#8b84c2; --fg:#efeaff;
   --pink:#ff3ea5; --cyan:#2de2e6; --yellow:#ffd319; --lime:#7dff8a; --orange:#ff8a3d; --red:#ff4b5c; --violet:#b07bff;
-  --k-wake:#ff4b5c; --k-sleep:#ff4b5c; --k-study:#38a8ff; --k-gym:#ffd319; --k-pt:#7dff8a; --k-lecture:#c9b6ff; --k-lab:#ffe3a3; --k-tut:#ffb8a3; --k-work:#ff8a3d; --k-quest:#ff3ea5; --k-other:#9aa7c7;
+  --k-wake:#ff4b5c; --k-sleep:#ff4b5c; --k-study:#38a8ff; --k-gym:#ffd319; --k-pt:#7dff8a; --k-lecture:#c9b6ff; --k-lab:#ffe3a3; --k-tut:#ffb8a3; --k-work:#ff8a3d; --k-quest:#ff3ea5; --k-other:#9aa7c7; --k-q-work:#ff8a3d; --k-q-uni:#c9b6ff; --k-q-gen:#ff3ea5;
   --r-common:#9aa7c7; --r-rare:#2de2e6; --r-epic:#c86bff; --r-legendary:#ffd319;
   --f-display:"Press Start 2P", ui-monospace, monospace;
   --f-body:"Chakra Petch", system-ui, sans-serif;
@@ -191,11 +200,18 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--
 .loading{min-height:50vh;display:grid;place-items:center;text-align:center}
 .loading b{font-family:var(--f-display);font-size:14px;color:var(--yellow);animation:blink 1s steps(2) infinite}
 .note{font-size:13px;color:var(--dim)}
+.cu-list{display:flex;flex-direction:column;gap:8px}
+.cu-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;background:var(--bg2);border:2px solid var(--line);border-left:6px solid var(--k-work)}
+.cu-row a{color:var(--fg);font-weight:600;text-decoration:none;overflow-wrap:anywhere}
+.cu-row a:hover{text-decoration:underline}
+.cu-locked{display:flex;gap:12px;align-items:center}
+.lockpix{font-family:var(--f-display);font-size:18px;color:var(--k-work)}
+.due-over{color:var(--red)} .due-today{color:var(--yellow)} .due-later{color:var(--dim)}
 
 @media (max-width:900px){.grid-today{grid-template-columns:minmax(0,1fr)} .hud{grid-template-columns:1fr auto} .brand{display:none} .counters{grid-column:1/-1;justify-content:space-between} .ctr{flex:1;min-width:0}}
 @media (max-width:640px){.erow{grid-template-columns:1fr 1fr;padding-bottom:10px;border-bottom:2px solid var(--line)} .erow .ename{grid-column:1/-1;order:-1} .ehead{display:none}
   .row{grid-template-columns:52px 5px minmax(0,1fr);} .row .act{grid-column:1/-1;width:100%}
-  .big-count{font-size:52px}}
+  .big-count{font-size:52px} .cu-row{grid-template-columns:1fr} .cu-row .act{width:100%}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 
@@ -238,7 +254,8 @@ const GRACE = 60;              // minutes after end that still count as on time
 const CLEAR_RATIO = 0.8;       // share of tasks on time to clear a day
 const MAX_FREEZE = 3;
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
-const KINDS = {wake:'Wake',sleep:'Sleep',study:'Study',gym:'Gym',pt:'Study / PT',lecture:'Lecture',lab:'Lab',tut:'Tutorial',work:'Work',quest:'Quest',other:'Other'};
+const KINDS = {wake:'Wake',sleep:'Sleep',study:'Study',gym:'Gym',pt:'Study / PT',lecture:'Lecture',lab:'Lab',tut:'Tutorial',work:'Work',quest:'Quest',other:'Other','q-work':'Work task','q-uni':'University task','q-gen':'General task'};
+const CATS = {work:'Work',uni:'University',gen:'General'};
 const RANKS = [[1,'ROOKIE'],[3,'BUTTON MASHER'],[5,'COMBO STARTER'],[8,'ARCADE REGULAR'],[12,'HIGH SCORER'],[16,'SPEEDRUNNER'],[20,'BOSS HUNTER'],[25,'GRANDMASTER'],[30,'FINAL BOSS']];
 const RARITY = {common:{c:'#9aa7c7',xp:10,label:'COMMON'},rare:{c:'#2de2e6',xp:30,label:'RARE'},epic:{c:'#c86bff',xp:80,label:'EPIC'},legendary:{c:'#ffd319',xp:250,label:'LEGENDARY'}};
 const ADJ = {common:['Pixel','Scuffed','Lo-Fi','Tiny','Bit'],rare:['Turbo','Neon','Hyper','Chrome','Glitch'],epic:['Quantum','Plasma','Mega','Phantom','Ultra'],legendary:['Golden','Mythic','Omega','Cosmic','Eternal']};
@@ -266,6 +283,7 @@ const ACH = [
   {id:'boss5',name:'Raid Leader',desc:'Defeat 5 bosses',t:p=>st(p,'bossKills')>=5},
   {id:'loot10',name:'Collector',desc:'Collect 10 loot items',t:p=>st(p,'loot')>=10},
   {id:'legend',name:'Legendary',desc:'Find a legendary drop',t:p=>st(p,'legendary')>=1},
+  {id:'cu10',name:'Inbox Hero',desc:'Close 10 ClickUp tasks',t:p=>st(p,'clickup')>=10},
 ];
 function st(p,k){return (p.stats&&p.stats[k])||0}
 
@@ -334,7 +352,7 @@ function newProfile(){ const t=dkey(new Date()); return {created:t, xp:0, freeze
 function tasksFor(key){
   const di = dayIdx(fromKey(key));
   const out = S.schedule.filter(b=>b.day===di).map(b=>({key:b.id,title:b.title,kind:b.kind,loc:b.loc||'',start:b.start,end:b.end||b.start,mult:b.mult||1}));
-  for(const o of S.oneoffs) if(o.date===key) out.push({key:'o:'+o.id,title:o.title,kind:'quest',loc:'',start:o.start||null,end:o.end||o.start||null,mult:o.mult||1,oneoff:true});
+  for(const o of S.oneoffs) if(o.date===key) out.push({key:'o:'+o.id,title:o.title,kind:'q-'+(CATS[o.cat]?o.cat:'gen'),loc:'',start:o.start||null,end:o.end||o.start||null,mult:o.mult||1,oneoff:true});
   return out.sort((a,b)=>(a.start==null?9999:toMin(a.start))-(b.start==null?9999:toMin(b.start)));
 }
 function timing(t){
@@ -599,22 +617,27 @@ function renderToday(partial){
   const tasks=tasksFor(S.todayKey), nm=nowMin();
   if(!partial || !$('#now-slot')){
     $('#view').innerHTML=`<div class="grid-today">
-      <div class="col"><div id="now-slot"></div><div id="meter-slot"></div>
-        <section class="panel"><div class="ptitle">SIDE QUEST</div>
+      <div class="col"><div id="now-slot"></div><div id="meter-slot"></div><div id="cu-slot"></div></div>
+      <div class="col">
+        <section class="panel"><div class="ptitle">NEW TASK</div>
           <form class="form" id="oneoff-form">
-            <input type="text" id="oo-title" placeholder="e.g. Email tutor about lab report" maxlength="80" required aria-label="Quest name">
+            <input type="text" id="oo-title" placeholder="e.g. Email tutor about lab report" maxlength="80" required aria-label="Task name">
+            <select id="oo-cat" aria-label="Category"><option value="work">Work</option><option value="uni">University</option><option value="gen" selected>General</option></select>
+            <input type="date" id="oo-date" value="${S.todayKey}" aria-label="Day">
             <input type="time" id="oo-start" aria-label="Start time (optional)">
             <input type="time" id="oo-end" aria-label="End time (optional)">
             <label class="toggle"><input type="checkbox" id="oo-star"> x1.5 XP</label>
             <button class="btn solid" type="submit">ADD</button>
           </form>
-          <p class="note">Added to today. Leave times empty for an any-time quest.</p>
-        </section></div>
+          <p class="note">Pick a category and day. Leave times empty for an any-time task.</p>
+        </section>
       <section class="panel"><div class="ptitle"><span>TODAY · ${DAYS[dayIdx(new Date())]} ${S.todayKey.slice(8)}/${S.todayKey.slice(5,7)}</span><span id="clock"></span></div><div id="track-slot"></div></section>
+      </div>
     </div>`;
   }
   $('#now-slot').innerHTML=nowCardHTML(tasks,nm);
   $('#meter-slot').innerHTML=meterHTML();
+  $('#cu-slot').innerHTML=cuHTML();
   $('#track-slot').innerHTML=trackHTML(tasks,nm);
   tickCountdowns();
 }
@@ -643,7 +666,7 @@ async function renderWeek(){
 function renderBosses(){
   const alive=S.bosses.filter(b=>!b.defeatedAt), dead=S.bosses.filter(b=>b.defeatedAt);
   const card=b=>{ const hits=b.steps.filter(s=>s.done).length; return `<section class="panel boss ${b.defeatedAt?'dead':''}">
-    <h3>${b.defeatedAt?'DEFEATED · ':''}${esc(b.name)}</h3>
+    <h3>${b.defeatedAt?'DEFEATED · ':''}${esc(b.name)}</h3>${CATS[b.cat]?`<div class="chips" style="margin:-4px 0 10px"><span class="chip" style="color:var(--k-q-${b.cat})">${CATS[b.cat].toUpperCase()}</span></div>`:''}
     <div class="hp" aria-label="${b.steps.length-hits} of ${b.steps.length} HP left">${b.steps.map(s=>`<i class="${s.done?'gone':''}"></i>`).join('')}</div>
     <ul class="steps">${b.steps.map((s,i)=>`<li class="${s.done?'hit':''}"><span>${esc(s.t)}</span>${s.done?'<span class="note">HIT</span>':`<button class="btn small" data-act="hit" data-boss="${b.id}" data-i="${i}">HIT</button>`}</li>`).join('')}</ul>
     <p class="note" style="margin-top:10px">${b.defeatedAt?'Reward claimed.':`Each hit +20 XP · defeat +${100+25*b.steps.length} XP and an epic-or-better drop`}</p>
@@ -651,7 +674,8 @@ function renderBosses(){
   </section>`; };
   $('#view').innerHTML=`<section class="panel"><div class="ptitle">SPAWN A BOSS</div>
     <form id="boss-form" class="form" style="flex-direction:column;align-items:stretch">
-      <input type="text" id="boss-name" placeholder="Big goal, e.g. Finish Risk Analysis revision" maxlength="80" required aria-label="Boss name">
+      <div class="form"><input type="text" id="boss-name" placeholder="Big goal, e.g. Finish Risk Analysis revision" maxlength="80" required aria-label="Boss name">
+      <select id="boss-cat" aria-label="Category"><option value="work">Work</option><option value="uni" selected>University</option><option value="gen">General</option></select></div>
       <textarea id="boss-steps" rows="4" placeholder="One step per line: each is a hit&#10;Chapter 1 notes&#10;Chapter 2 notes&#10;Past paper 2024" required aria-label="Steps"></textarea>
       <div><button class="btn solid" type="submit">SPAWN BOSS</button></div>
     </form></section>
@@ -687,7 +711,7 @@ function renderEdit(){
       <input type="time" id="s-${b.id}" data-f="start" value="${b.start}" aria-label="Start">
       <input type="time" id="e-${b.id}" data-f="end" value="${b.end||b.start}" aria-label="End (same as start for a check-in)">
       <input type="text" id="n-${b.id}" class="ename" data-f="title" value="${esc(b.title+(b.loc?" · "+b.loc:""))}" aria-label="Name">
-      <select id="k-${b.id}" data-f="kind" aria-label="Type">${Object.entries(KINDS).filter(([k])=>k!=='quest').map(([k,l])=>`<option value="${k}" ${b.kind===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="k-${b.id}" data-f="kind" aria-label="Type">${Object.entries(KINDS).filter(([k])=>!k.startsWith('q')).map(([k,l])=>`<option value="${k}" ${b.kind===k?'selected':''}>${l}</option>`).join('')}</select>
       <select id="m-${b.id}" data-f="mult" aria-label="XP multiplier">${[1,1.5,2,3].map(m=>`<option value="${m}" ${(b.mult||1)==m?'selected':''}>x${m}</option>`).join('')}</select>
       <button class="btn small warn" data-act="edel" data-id="${b.id}" aria-label="Delete">DEL</button>
     </div>`).join('') || '<div class="empty"><b>EMPTY DAY</b>Add a block below.</div>'}
@@ -695,6 +719,10 @@ function renderEdit(){
     <span style="flex:1"></span><button class="btn" data-act="erevert">DISCARD</button><button class="btn solid" data-act="esave">SAVE ROUTINE</button></div>
     <p class="note" style="margin-top:10px">Set end = start for a check-in task like Wake or Sleep. Location goes after a " · " in the name if you want it shown separately, e.g. "Lec EC4307 · ERB001".</p>
   </section>
+  ${Store.db?'':`<section class="panel"><div class="ptitle">SAVE FILE</div>
+    <p class="note" style="margin:0 0 10px">Progress is saved on this device. Export a save file to back it up or move it to another device, then import it there.</p>
+    <div class="form"><button class="btn" data-act="export">EXPORT SAVE</button><label class="btn" for="import-file" style="cursor:pointer">IMPORT SAVE</label><input type="file" id="import-file" accept="application/json,.json" hidden></div>
+  </section>`}
   <section class="panel"><div class="ptitle">HOW SCORING WORKS</div><ul class="rules">
     <li><b>Check-ins</b> (Wake, Sleep) open 15 min early and stay on time for ${GRACE} min after.</li>
     <li><b>Blocks</b> can be claimed any time once they start. On time until ${GRACE} min after the end.</li>
@@ -725,6 +753,9 @@ $('#view').addEventListener('click',async e=>{
   if(a==='complete') complete(b.dataset.key,b);
   else if(a==='undo') undo(b.dataset.key);
   else if(a==='hit') hitBoss(b.dataset.boss,+b.dataset.i,b);
+  else if(a==='cu-done') completeCU(b.dataset.id,b);
+  else if(a==='export') exportSave();
+  else if(a==='cu-retry'){ try{ await CU.mcp.callTool('ClickUp','clickup_filter_tasks',CU_INPUT); CU.mcp.invalidate('ClickUp','clickup_filter_tasks').catch(()=>{}); }catch(err){ CU.err=err.code; refreshCU(); } }
   else if(a==='delboss'){ S.bosses=S.bosses.filter(x=>x.id!==b.dataset.boss); await Store.del('bosses/'+b.dataset.boss); renderBosses(); }
   else if(a==='eday'){ S.editDay=+b.dataset.i; renderEdit(); }
   else if(a==='eadd'){ S.draft.push({id:'b'+uid(),day:S.editDay,start:'12:00',end:'13:00',title:'New block',kind:'study',mult:1}); S.dirty=true; renderEdit(); }
@@ -744,13 +775,15 @@ $('#view').addEventListener('submit',async e=>{
   if(e.target.id==='oneoff-form'){
     const title=$('#oo-title').value.trim(); if(!title) return;
     const start=$('#oo-start').value||null; const end=$('#oo-end').value||start;
-    const o={id:uid(),title,date:S.todayKey,start,end,mult:$('#oo-star').checked?1.5:1};
+    const date=$('#oo-date').value||S.todayKey; const cat=$('#oo-cat').value||'gen';
+    const o={id:uid(),title,cat,date,start,end,mult:$('#oo-star').checked?1.5:1};
     S.oneoffs.push(o); await Store.set('oneoffs/'+o.id,o); Sfx.coin(); e.target.reset(); renderToday(true); renderHUD();
+    toast('TASK ADDED',`${CATS[cat]} · ${date===S.todayKey?'today':DAYS[dayIdx(fromKey(date))]+' '+date.slice(8)+'/'+date.slice(5,7)}`,`var(--k-q-${cat})`);
   }
   if(e.target.id==='boss-form'){
     const name=$('#boss-name').value.trim(); const steps=$('#boss-steps').value.split('\n').map(s=>s.trim()).filter(Boolean).slice(0,30);
     if(!name||!steps.length) return;
-    const b={id:uid(),name,steps:steps.map(t=>({t,done:false})),created:Date.now()};
+    const b={id:uid(),name,cat:$('#boss-cat').value||'gen',steps:steps.map(t=>({t,done:false})),created:Date.now()};
     S.bosses.push(b); await Store.set('bosses/'+b.id,b); Sfx.bossDown(); FX.banner('BOSS APPEARS', name.toUpperCase(), sprite('boss'+b.id,'#b07bff',12), 1800); renderBosses();
   }
 });
@@ -765,6 +798,89 @@ function hitBoss(id,i,el){
     setTimeout(()=>{ Sfx.bossDown(); FX.banner('BOSS DEFEATED', `${b.name} · +${bonus} XP`, sprite('boss'+b.id,'#7dff8a',12), 2400); FX.burst(innerWidth/2,innerHeight/2,['#7dff8a','#ffd319','#ff3ea5','#2de2e6'],140,12); grantLoot(rollLoot(true,'boss')); },400);
   }
   checkAch(); Store.set('bosses/'+b.id,b); saveProfile(); renderHUD(); renderBosses();
+}
+
+/* ============ save file (standalone version) ============ */
+async function exportSave(){
+  const data={app:'daily-arcade',version:1,exported:new Date().toISOString(),
+    profile:await Store.get('game/profile'), schedule:await Store.get('game/schedule'), clickupDone:await Store.get('clickup/done'),
+    days:await Store.list('days'), oneoffs:await Store.list('oneoffs'), bosses:await Store.list('bosses')};
+  const blob=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`daily-arcade-save-${S.todayKey}.json`; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},1000);
+  toast('EXPORTED','Save file downloaded.','var(--lime)');
+}
+async function importSave(file){
+  try{
+    const d=JSON.parse(await file.text()); if(d.app!=='daily-arcade') throw new Error('not a Daily Arcade save');
+    const strip=o=>{ const c={...o}; delete c.id; return c; };
+    if(d.profile) await Store.set('game/profile',d.profile);
+    if(d.schedule) await Store.set('game/schedule',d.schedule);
+    if(d.clickupDone) await Store.set('clickup/done',d.clickupDone);
+    for(const x of d.days||[]) if(x.date) await Store.set('days/'+x.date,strip(x));
+    for(const x of d.oneoffs||[]) if(x.id) await Store.set('oneoffs/'+x.id,{...x});
+    for(const x of d.bosses||[]) if(x.id) await Store.set('bosses/'+x.id,{...x});
+    toast('IMPORTED','Save loaded. Restarting…','var(--lime)'); setTimeout(()=>location.reload(),900);
+  }catch(e){ toast('IMPORT FAILED',"That file isn't a Daily Arcade save file.",'var(--red)'); }
+}
+document.addEventListener('change',e=>{ if(e.target.id==='import-file'&&e.target.files[0]) importSave(e.target.files[0]); });
+if('serviceWorker' in navigator && !window.claude){ addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
+
+/* ============ ClickUp work tasks (shown only during Work blocks) ============ */
+const CU = {mcp:null, tasks:[], state:'loading', err:'', done:{}, pending:{}};
+const CU_INPUT = {assignees:['me'], fields:['status','priority','due_date','list'], order_by:'due_date', reverse:true};
+function workBlockNow(){ const nm=nowMin(); return tasksFor(S.todayKey).find(t=>{ const tm=timing(t); return t.kind==='work'&&!tm.point&&nm>=tm.s&&nm<tm.e; })||null; }
+function nextWorkBlock(){ for(let i=0;i<8;i++){ const k=addDays(S.todayKey,i); const nm=i===0?nowMin():-1; const b=tasksFor(k).find(t=>{ const tm=timing(t); return t.kind==='work'&&!tm.point&&tm.s>nm; }); if(b) return {k,b}; } return null; }
+function cuMsg(code){ return ({needs_reauth:'Your ClickUp sign-in expired. Reconnect ClickUp in claude.ai Settings → Connectors.', server_not_connected:"ClickUp isn't connected for this account. Add it in claude.ai Settings → Connectors.", selection_required:'Choose which ClickUp connection to use in the prompt claude.ai shows.', not_in_manifest:"ClickUp is turned off for this app. Turn it on from the app's permissions menu.", approval_required:'ClickUp needs your approval for this app.', blocked_by_policy:'Your organization blocks this ClickUp action.', server_unavailable:"ClickUp isn't responding right now. It will retry automatically."})[code] || "Couldn't load ClickUp tasks right now."; }
+async function initClickUp(){
+  if(window.claude && typeof window.claude.use==='function'){ try{ CU.mcp=await window.claude.use('mcp'); }catch(e){ CU.mcp=null; } }
+  if(!CU.mcp){ CU.state='off'; return refreshCU(); }
+  CU.mcp.watchTool('ClickUp','clickup_filter_tasks',CU_INPUT,ev=>{
+    if(ev.type==='data'){ const p=ev.result.payload||{}; CU.tasks=Array.isArray(p.tasks)?p.tasks:[]; CU.state='ok'; CU.err=''; }
+    else { const c=(ev.error&&ev.error.code)||'upstream_error';
+      if(['needs_reauth','server_not_connected','blocked_by_policy','approval_required','not_in_manifest','selection_required'].includes(c)){ CU.tasks=[]; CU.state='error'; CU.err=c; }
+      else { CU.err=c; if(CU.state!=='ok') CU.state='error'; } }
+    refreshCU();
+  },{refetchInterval:5*60*1000});
+}
+function refreshCU(){ const el=$('#cu-slot'); if(S.tab==='today'&&el) el.innerHTML=cuHTML(); }
+function cuXP(t){ return Math.round(40*({urgent:2,high:1.5,normal:1,low:.8}[t.priority]||1)); }
+function dueInfo(t){ if(!t.due_date) return null; const d=new Date(Number(t.due_date)); const k=dkey(d); const end=fromKey(k); end.setHours(23,59,59,999); const dm=k.slice(8)+'/'+k.slice(5,7);
+  return {k, end:end.getTime(), label: k===S.todayKey?'DUE TODAY': k<S.todayKey?'OVERDUE · '+dm : 'DUE '+DAYS[dayIdx(d)]+' '+dm, cls: k===S.todayKey?'due-today':k<S.todayKey?'due-over':'due-later'}; }
+function cuHTML(){
+  const open=CU.tasks.filter(t=>!CU.done[t.id]);
+  const head=`<div class="ptitle"><span>CLICKUP · WORK TASKS</span><span>${CU.state==='ok'||CU.tasks.length?open.length+' OPEN':''}</span></div>`;
+  if(CU.state==='off') return `<section class="panel">${head}<p class="note">ClickUp tasks are available in the Claude version of the app for now.</p></section>`;
+  if(CU.state==='loading') return `<section class="panel">${head}<p class="note">Loading your ClickUp tasks…</p></section>`;
+  if(CU.state==='error'&&!CU.tasks.length) return `<section class="panel">${head}<p class="note">${esc(cuMsg(CU.err))}</p>${CU.err==='approval_required'?'<button class="btn small" data-act="cu-retry" style="margin-top:8px">ALLOW CLICKUP</button>':''}</section>`;
+  const w=workBlockNow();
+  if(!w){ const n=nextWorkBlock(); const when=n?`${n.k===S.todayKey?'today':DAYS[dayIdx(fromKey(n.k))]} ${fmtMin(timing(n.b).s)}–${fmtMin(timing(n.b).e)}`:'none scheduled this week';
+    return `<section class="panel">${head}<div class="cu-locked"><span class="lockpix" aria-hidden="true">▣</span><div><b>Unlocks during your Work shift</b><div class="note">${open.length} task${open.length===1?'':'s'} waiting · next shift: ${esc(when)}</div></div></div></section>`; }
+  return `<section class="panel" style="border-color:var(--k-work)">${head}<p class="note" style="margin:-4px 0 10px">Work shift live until ${fmtMin(timing(w).e)}. Completing a task here also marks it complete in ClickUp.</p>
+    ${open.length?`<div class="cu-list">${open.map(t=>{ const d=dueInfo(t); const over=d&&Date.now()>d.end; const xp=Math.round(cuXP(t)*(over?.5:1.25)); const busy=CU.pending[t.id];
+      return `<div class="cu-row"><div><a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.name)}</a><div class="chips" style="margin-top:6px">${d?`<span class="chip ${d.cls}">${d.label}</span>`:'<span class="chip due-later">NO DUE DATE</span>'}${t.priority?`<span class="chip" style="color:var(--yellow)">${esc(String(t.priority).toUpperCase())}</span>`:''}${t.list&&t.list.name?`<span class="chip due-later">${esc(t.list.name.toUpperCase())}</span>`:''}</div></div>
+      <button class="act ${over?'late':'ready'}" data-act="cu-done" data-id="${esc(t.id)}" ${busy?'disabled':''}>${busy?'SAVING…':'COMPLETE<br>+'+xp+' XP'}</button></div>`; }).join('')}</div>`
+      :`<div class="empty"><b>ALL CLEAR</b>No open ClickUp tasks assigned to you.</div>`}
+    ${CU.state==='error'?`<p class="note" style="margin-top:8px">${esc(cuMsg(CU.err))} Showing the last list loaded.</p>`:''}
+  </section>`;
+}
+async function completeCU(id, el){
+  Sfx.ensure(); const t=CU.tasks.find(x=>x.id===id); if(!t||CU.done[id]||CU.pending[id]) return;
+  if(!workBlockNow()){ Sfx.locked(); FX.shake(); return; }
+  const r=el.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2;
+  const d=dueInfo(t); const onTime=!d||Date.now()<=d.end; const xp=Math.round(cuXP(t)*(onTime?1.25:.5));
+  CU.pending[id]=true; refreshCU();
+  let closed=false, err=null;
+  try{ await CU.mcp.callTool('ClickUp','clickup_update_task',{task_id:id,status:'complete'}); closed=true; }catch(e){ err=e; }
+  delete CU.pending[id];
+  CU.done[id]={at:Date.now(),xp,onTime,name:t.name,closed};
+  Store.set('clickup/done',{ids:CU.done});
+  S.today.done['cu:'+id]={at:Date.now(),onTime,xp,title:t.name,clickup:true}; saveToday();
+  bump('done'); bump(onTime?'onTime':'late'); bump('clickup'); addXP(xp);
+  if(onTime){ Sfx.complete(3); FX.burst(cx,cy,['#ff8a3d','#ffd319','#2de2e6'],46,8); FX.pop(cx,cy-20,'+'+xp+' XP'); FX.pop(cx,cy-50,d?'BEAT THE DEADLINE':'TASK DONE','sm'); }
+  else { Sfx.late(); FX.burst(cx,cy,['#ff8a3d','#ffd319'],18,5); FX.pop(cx,cy-20,'+'+xp+' XP'); FX.pop(cx,cy-50,'PAST DUE · HALF XP','sm'); }
+  grantLoot(rollLoot(onTime,false)); checkAch(); saveProfile(); renderHUD(); refreshCU();
+  if(closed){ toast('CLOSED IN CLICKUP',t.name,'var(--k-work)'); CU.mcp.invalidate('ClickUp','clickup_filter_tasks').catch(()=>{}); }
+  else toast('SAVED HERE ONLY',`Couldn't mark it complete in ClickUp${err&&err.code?' ('+err.code+')':''}. Close it there when you can.`,'var(--yellow)');
 }
 
 /* ============ boot ============ */
@@ -789,7 +905,10 @@ async function boot(){
   Store.watch('game/schedule',d=>{ if(d&&d.blocks){ S.schedule=d.blocks; if(S.tab==='today') renderToday(true); else if(S.tab==='edit'&&!S.dirty){ S.draft=null; renderEdit(); } } });
   Store.watchColl('oneoffs',l=>{ S.oneoffs=l.filter(o=>o.date>=cutoff); if(S.tab==='today') renderToday(true); });
   Store.watchColl('bosses',l=>{ S.bosses=l.sort((a,b)=>a.created-b.created); if(S.tab==='bosses') renderBosses(); });
-  if(!Store.db) setTimeout(()=>toast('LOCAL SAVE','Cloud sync is unavailable in this view, so progress is saved in this browser only.','var(--yellow)'),800);
+  const cud=await Store.get('clickup/done'); CU.done=(cud&&cud.ids)||{};
+  Store.watch('clickup/done',d=>{ CU.done=(d&&d.ids)||{}; refreshCU(); });
+  initClickUp();
+  if(!Store.db && !S.schedule.length) setTimeout(()=>toast('NEW SAVE','No routine on this device yet. Import a save file in Edit Routine, or add blocks there.','var(--yellow)'),800);
   render();
   let lastFull=Date.now();
   setInterval(async()=>{
