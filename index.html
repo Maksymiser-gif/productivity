@@ -233,6 +233,7 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--
       <div class="ctr streak"><small>STREAK</small><b id="c-streak">0</b></div>
       <div class="ctr freeze"><small>FREEZE</small><b id="c-freeze">0</b></div>
       <div class="ctr combo"><small>COMBO</small><b id="c-combo">x0</b></div>
+      <button class="iconbtn" id="syncbtn" hidden title="Cloud sync">LOCAL</button>
       <button class="iconbtn" id="mute" aria-pressed="true" title="Sound on/off">SFX ON</button>
     </div>
   </header>
@@ -321,6 +322,7 @@ const Store = {
     const run = async()=>{
       if(this.db) return this.ref(path).set(data);
       try{ localStorage.setItem('arcade:'+path, JSON.stringify(data)); }catch(e){}
+      Cloud.touch(path,false);
     };
     const p=(this.q[path]||Promise.resolve()).then(run).catch(e=>{ console.warn('save failed',path,e); toast('SAVE FAILED','Could not save. Check your connection and try again.','var(--red)'); });
     this.q[path]=p; return p;
@@ -328,6 +330,7 @@ const Store = {
   async del(path){
     if(this.db) return this.ref(path).delete();
     try{ localStorage.removeItem('arcade:'+path);}catch(e){}
+    Cloud.touch(path,true);
   },
   async list(coll){
     if(this.db){ const s=await this.db.collection(coll).get(); return s.docs.map(d=>({id:d.id,...clone(d.data())})); }
@@ -341,6 +344,78 @@ const Store = {
   watch(path,cb){ if(!this.db) return ()=>{}; return this.ref(path).onSnapshot(s=>cb(s.exists?clone(s.data()):null), e=>console.warn(e)); },
   watchColl(coll,cb){ if(!this.db) return ()=>{}; return this.db.collection(coll).onSnapshot(s=>cb(s.docs.map(d=>({id:d.id,...clone(d.data())}))), e=>console.warn(e)); }
 };
+
+/* ============ cloud sync (standalone version, Supabase) ============ */
+const SB_LIB='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
+function loadScript(src){ return new Promise((res,rej)=>{ if(window.supabase&&window.supabase.createClient) return res(); const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+const lsRaw={ read(p){ try{ const v=localStorage.getItem('arcade:'+p); return v?JSON.parse(v):null; }catch(e){ return null; } }, write(p,d){ try{ localStorage.setItem('arcade:'+p,JSON.stringify(d)); }catch(e){} }, remove(p){ try{ localStorage.removeItem('arcade:'+p); }catch(e){} },
+  paths(){ const out=[]; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k.startsWith('arcade:')&&!k.startsWith('arcade:__')&&k!=='arcade:muted') out.push(k.slice(7)); } }catch(e){} return out; } };
+const Cloud = {
+  cfg:null, sb:null, user:null, timer:null, busy:false, status:'off', err:'', lastSync:null,
+  get(k,d){ try{ const v=localStorage.getItem('arcade:__'+k); return v?JSON.parse(v):d; }catch(e){ return d; } },
+  put(k,v){ try{ if(v==null) localStorage.removeItem('arcade:__'+k); else localStorage.setItem('arcade:__'+k,JSON.stringify(v)); }catch(e){} },
+  async init(){
+    if(window.claude) return;
+    this.cfg=this.get('cloud',null); this.sb=null; this.user=null;
+    if(!this.cfg){ this.status='off'; return renderSyncBadge(); }
+    try{ await loadScript(SB_LIB); this.sb=window.supabase.createClient(this.cfg.url,this.cfg.key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:'arcade-sb-auth'}}); }
+    catch(e){ this.status='error'; this.err="Couldn't load the sync library. Check your connection."; return renderSyncBadge(); }
+    const {data}=await this.sb.auth.getSession(); this.user=(data&&data.session&&data.session.user)||null;
+    this.sb.auth.onAuthStateChange((_e,s)=>{ this.user=(s&&s.user)||null; renderSyncBadge(); });
+    this.status=this.user?'ready':'signedout'; renderSyncBadge();
+  },
+  touch(path,deleted){ if(window.claude) return; const m=this.get('meta',{}); m[path]=Date.now(); this.put('meta',m); const d=this.get('dirty',{}); d[path]=deleted?'del':1; this.put('dirty',d); this.schedule(); },
+  schedule(){ if(!this.user) return; clearTimeout(this.timer); this.timer=setTimeout(()=>this.sync(),1500); },
+  joinMark(){ // on sign-in: the cloud copy wins wherever it exists, anything only on this device gets uploaded
+    const m=this.get('meta',{}), d=this.get('dirty',{}); for(const p of lsRaw.paths()){ m[p]=1; d[p]=1; } this.put('meta',m); this.put('dirty',d); this.put('cursor',null); },
+  async sync(){
+    if(!this.sb||!this.user||this.busy) return false; this.busy=true; renderSyncBadge(); let changed=false;
+    try{
+      let cursor=this.get('cursor','1970-01-01T00:00:00Z');
+      const meta=this.get('meta',{}), dirty=this.get('dirty',{});
+      for(;;){
+        const {data:rows,error}=await this.sb.from('arcade_docs').select('path,data,deleted,updated_at,synced_at').gt('synced_at',cursor).order('synced_at',{ascending:true}).limit(500);
+        if(error) throw error;
+        for(const r of rows){ const rt=Date.parse(r.updated_at); if(rt>(meta[r.path]||0)){ if(r.deleted) lsRaw.remove(r.path); else lsRaw.write(r.path,r.data); meta[r.path]=rt; delete dirty[r.path]; changed=true; } cursor=r.synced_at; }
+        if(rows.length<500) break;
+      }
+      this.put('meta',meta); this.put('dirty',dirty); this.put('cursor',cursor);
+      const paths=Object.keys(dirty);
+      if(paths.length){
+        const up=paths.map(p=>({user_id:this.user.id, path:p, data:dirty[p]==='del'?null:lsRaw.read(p), deleted:dirty[p]==='del', updated_at:new Date(meta[p]||Date.now()).toISOString()}));
+        for(let i=0;i<up.length;i+=200){ const {error}=await this.sb.from('arcade_docs').upsert(up.slice(i,i+200),{onConflict:'user_id,path'}); if(error) throw error; }
+        const d2=this.get('dirty',{}); for(const p of paths) if(d2[p]===dirty[p]) delete d2[p]; this.put('dirty',d2);
+      }
+      this.status='ready'; this.err=''; this.lastSync=Date.now();
+    }catch(e){ this.status='error'; this.err=(e&&e.message)||'Sync failed'; }
+    this.busy=false; renderSyncBadge(); if(S.tab==='edit'&&!S.dirty) renderEdit(); return changed;
+  }
+};
+function renderSyncBadge(){ const b=document.getElementById('syncbtn'); if(!b) return; if(window.claude){ b.hidden=true; return; } b.hidden=false;
+  const C=Cloud; const [t,c]= C.busy?['SYNCING','var(--cyan)'] : !C.cfg?['LOCAL','var(--dim)'] : !C.user?['SIGN IN','var(--yellow)'] : C.status==='error'?['SYNC !','var(--red)'] : ['SYNCED','var(--lime)'];
+  b.textContent=t; b.style.color=c; b.style.borderColor=c; b.title=C.status==='error'?C.err:'Cloud sync'; }
+async function reloadFromStore(){
+  const p=await Store.get('game/profile'); if(p){ p.stats=p.stats||{}; p.items=p.items||[]; p.ach=p.ach||{}; S.profile=p; }
+  const sch=await Store.get('game/schedule'); S.schedule=(sch&&sch.blocks)||[];
+  S.oneoffs=await Store.list('oneoffs'); S.bosses=(await Store.list('bosses')).sort((a,b)=>a.created-b.created);
+  S.today=(await Store.get('days/'+S.todayKey))||{date:S.todayKey,done:{},combo:0}; S.today.done=S.today.done||{};
+  const cud=await Store.get('clickup/done'); CU.done=(cud&&cud.ids)||{}; S.week={};
+  if(S.tab==='edit'&&S.dirty){ renderHUD(); return; } if(S.tab==='edit') S.draft=null; render();
+}
+async function syncAndReload(){ if(await Cloud.sync()) await reloadFromStore(); }
+function cloudPanelHTML(){
+  const C=Cloud; let body; const host=C.cfg?esc(C.cfg.url.replace(/^https:\/\//,'')):'';
+  if(!C.cfg) body=`<p class="note" style="margin:0 0 10px">Sync progress between your phone and Mac through your own Supabase project. Find both values in Supabase under <b>Project Settings → API Keys</b>. Use the publishable (anon) key, never the secret key.</p>
+    <form class="form" id="cloud-cfg"><input type="url" id="cl-url" placeholder="https://xxxx.supabase.co" required aria-label="Project URL"><input type="text" id="cl-key" placeholder="Publishable key" required aria-label="Publishable key" autocomplete="off" spellcheck="false"><button class="btn solid" type="submit">CONNECT</button></form>`;
+  else if(!C.sb) body=`<p class="note" style="margin:0 0 10px">${esc(C.err||'Not connected.')}</p><div class="form"><button class="btn" data-act="cl-retry">TRY AGAIN</button><button class="btn small warn" data-act="cl-disconnect">DISCONNECT PROJECT</button></div>`;
+  else if(!C.user) body=`<p class="note" style="margin:0 0 10px">Connected to ${host}. Sign in to start syncing, with the same account on every device.</p>
+    <form class="form" id="cloud-auth"><input type="email" id="cl-email" autocomplete="username" required placeholder="Email" aria-label="Email"><input type="password" id="cl-pass" autocomplete="current-password" minlength="8" required placeholder="Password (8+ characters)" aria-label="Password"><button class="btn solid" type="submit" data-mode="in">SIGN IN</button><button class="btn" type="submit" data-mode="up">CREATE ACCOUNT</button></form>
+    <button class="btn small warn" data-act="cl-disconnect" style="margin-top:10px">DISCONNECT PROJECT</button>`;
+  else { const t=C.lastSync?new Date(C.lastSync):null;
+    body=`<p class="note" style="margin:0 0 10px">Signed in as <b>${esc(C.user.email||'')}</b>${t?` · last synced ${pad(t.getHours())}:${pad(t.getMinutes())}`:''}. Changes sync automatically.</p>${C.status==='error'?`<p class="note" style="color:var(--red);margin:0 0 10px">Last sync failed: ${esc(C.err)}</p>`:''}
+    <div class="form"><button class="btn" data-act="cl-sync">SYNC NOW</button><button class="btn warn" data-act="cl-signout">SIGN OUT</button></div>`; }
+  return `<section class="panel"><div class="ptitle"><span>CLOUD SYNC</span><span id="cl-state">${!C.cfg?'OFF':C.user?'ON':'SIGNED OUT'}</span></div>${body}</section>`;
+}
 
 /* ============ state ============ */
 const S = { profile:null, schedule:[], today:{done:{}}, todayKey:dkey(new Date()), oneoffs:[], bosses:[], week:{}, tab:'today', editDay:dayIdx(new Date()), draft:null, dirty:false, unsubToday:null };
@@ -579,7 +654,7 @@ function pickNow(tasks,nm){
 }
 function nowCardHTML(tasks,nm){
   const pick=pickNow(tasks,nm);
-  if(!tasks.length) return `<section class="panel now"><div class="tag">NO STAGES TODAY</div><h2>Free play</h2><p class="meta">Nothing is scheduled. Add a quest below or set up your routine in Edit Routine.</p></section>`;
+  if(!tasks.length) return `<section class="panel now"><div class="tag">NO STAGES TODAY</div><h2>Free play</h2><p class="meta">Nothing is scheduled. Add a task or set up your routine in Edit Routine.</p></section>`;
   if(!pick) return `<section class="panel now"><div class="tag">ALL STAGES DONE</div><h2>GAME OVER… in a good way</h2><p class="meta">Everything on today's list is finished. Rest up for tomorrow's run.</p></section>`;
   const {t,s}=pick; const tm=timing(t);
   let countLabel='', target=null, cls='wait', btn='';
@@ -719,6 +794,7 @@ function renderEdit(){
     <span style="flex:1"></span><button class="btn" data-act="erevert">DISCARD</button><button class="btn solid" data-act="esave">SAVE ROUTINE</button></div>
     <p class="note" style="margin-top:10px">Set end = start for a check-in task like Wake or Sleep. Location goes after a " · " in the name if you want it shown separately, e.g. "Lec EC4307 · ERB001".</p>
   </section>
+  ${Store.db?'':cloudPanelHTML()}
   ${Store.db?'':`<section class="panel"><div class="ptitle">SAVE FILE</div>
     <p class="note" style="margin:0 0 10px">Progress is saved on this device. Export a save file to back it up or move it to another device, then import it there.</p>
     <div class="form"><button class="btn" data-act="export">EXPORT SAVE</button><label class="btn" for="import-file" style="cursor:pointer">IMPORT SAVE</label><input type="file" id="import-file" accept="application/json,.json" hidden></div>
@@ -755,6 +831,10 @@ $('#view').addEventListener('click',async e=>{
   else if(a==='hit') hitBoss(b.dataset.boss,+b.dataset.i,b);
   else if(a==='cu-done') completeCU(b.dataset.id,b);
   else if(a==='export') exportSave();
+  else if(a==='cl-sync'){ await syncAndReload(); toast(Cloud.status==='error'?'SYNC FAILED':'SYNCED',Cloud.status==='error'?Cloud.err:'Everything is up to date.',Cloud.status==='error'?'var(--red)':'var(--lime)'); }
+  else if(a==='cl-retry'){ await Cloud.init(); renderEdit(); }
+  else if(a==='cl-signout'){ await Cloud.sb.auth.signOut(); Cloud.user=null; Cloud.status='signedout'; renderSyncBadge(); renderEdit(); toast('SIGNED OUT','Progress stays on this device. Sign in again to resume syncing.','var(--yellow)'); }
+  else if(a==='cl-disconnect'){ if(Cloud.sb) try{ await Cloud.sb.auth.signOut(); }catch(e){} Cloud.put('cloud',null); Cloud.put('cursor',null); await Cloud.init(); renderEdit(); }
   else if(a==='cu-retry'){ try{ await CU.mcp.callTool('ClickUp','clickup_filter_tasks',CU_INPUT); CU.mcp.invalidate('ClickUp','clickup_filter_tasks').catch(()=>{}); }catch(err){ CU.err=err.code; refreshCU(); } }
   else if(a==='delboss'){ S.bosses=S.bosses.filter(x=>x.id!==b.dataset.boss); await Store.del('bosses/'+b.dataset.boss); renderBosses(); }
   else if(a==='eday'){ S.editDay=+b.dataset.i; renderEdit(); }
@@ -770,8 +850,23 @@ $('#view').addEventListener('change',e=>{
   if(f==='title'){ const parts=v.split(' · '); b.title=parts[0].trim(); b.loc=(parts[1]||'').trim(); } else b[f]=v;
   S.dirty=true; const t=document.querySelector('.ptitle span:last-child'); if(t) t.innerHTML='<span style="color:var(--yellow)">UNSAVED CHANGES</span>';
 });
+$('#syncbtn').addEventListener('click',async()=>{ if(Cloud.user){ await syncAndReload(); } else { S.tab='edit'; S.draft=null; render(); } });
 $('#view').addEventListener('submit',async e=>{
   e.preventDefault();
+  if(e.target.id==='cloud-cfg'){
+    const url=$('#cl-url').value.trim().replace(/\/+$/,''), key=$('#cl-key').value.trim();
+    if(!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)){ toast('CHECK THE URL','It should look like https://abcd1234.supabase.co','var(--red)'); return; }
+    if(/service_role|sb_secret_/i.test(key)){ toast('WRONG KEY','That looks like the secret key. Use the publishable (anon) key instead.','var(--red)'); return; }
+    Cloud.put('cloud',{url,key}); await Cloud.init(); renderEdit(); return;
+  }
+  if(e.target.id==='cloud-auth'){
+    const mode=(e.submitter&&e.submitter.dataset.mode)||'in'; const email=$('#cl-email').value.trim(), password=$('#cl-pass').value;
+    const res = mode==='up' ? await Cloud.sb.auth.signUp({email,password}) : await Cloud.sb.auth.signInWithPassword({email,password});
+    if(res.error){ toast(mode==='up'?'SIGN-UP FAILED':'SIGN-IN FAILED',res.error.message,'var(--red)'); return; }
+    if(!res.data.session){ toast('CHECK YOUR EMAIL','Confirm your address from the email Supabase sent, then sign in here.','var(--yellow)'); return; }
+    Cloud.user=res.data.session.user; Cloud.joinMark(); await Cloud.sync(); await reloadFromStore();
+    toast(Cloud.status==='error'?'SYNC FAILED':'SYNC ON',Cloud.status==='error'?Cloud.err:'This device is now synced.',Cloud.status==='error'?'var(--red)':'var(--lime)'); return;
+  }
   if(e.target.id==='oneoff-form'){
     const title=$('#oo-title').value.trim(); if(!title) return;
     const start=$('#oo-start').value||null; const end=$('#oo-end').value||start;
@@ -892,6 +987,9 @@ async function loadToday(){
 async function boot(){
   FX.init();
   await Store.init();
+  if(!Store.db){ await Cloud.init(); if(Cloud.user) await Cloud.sync();
+    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') syncAndReload(); });
+    setInterval(()=>{ if(document.visibilityState==='visible') syncAndReload(); },60000); }
   S.profile=(await Store.get('game/profile'));
   if(!S.profile){ S.profile=newProfile(); await saveProfile(); }
   S.profile.stats=S.profile.stats||{}; S.profile.items=S.profile.items||[]; S.profile.ach=S.profile.ach||{};
