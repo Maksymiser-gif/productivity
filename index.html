@@ -833,8 +833,9 @@ $('#view').addEventListener('click',async e=>{
   else if(a==='export') exportSave();
   else if(a==='cl-sync'){ await syncAndReload(); toast(Cloud.status==='error'?'SYNC FAILED':'SYNCED',Cloud.status==='error'?Cloud.err:'Everything is up to date.',Cloud.status==='error'?'var(--red)':'var(--lime)'); }
   else if(a==='cl-retry'){ await Cloud.init(); renderEdit(); }
-  else if(a==='cl-signout'){ await Cloud.sb.auth.signOut(); Cloud.user=null; Cloud.status='signedout'; renderSyncBadge(); renderEdit(); toast('SIGNED OUT','Progress stays on this device. Sign in again to resume syncing.','var(--yellow)'); }
+  else if(a==='cl-signout'){ await Cloud.sb.auth.signOut(); Cloud.user=null; Cloud.status='signedout'; clearInterval(CUEdge.timer); initClickUp(); renderSyncBadge(); renderEdit(); toast('SIGNED OUT','Progress stays on this device. Sign in again to resume syncing.','var(--yellow)'); }
   else if(a==='cl-disconnect'){ if(Cloud.sb) try{ await Cloud.sb.auth.signOut(); }catch(e){} Cloud.put('cloud',null); Cloud.put('cursor',null); await Cloud.init(); renderEdit(); }
+  else if(a==='cu-retry'&&CU.mode==='edge'){ CUEdge.fetch(); }
   else if(a==='cu-retry'){ try{ await CU.mcp.callTool('ClickUp','clickup_filter_tasks',CU_INPUT); CU.mcp.invalidate('ClickUp','clickup_filter_tasks').catch(()=>{}); }catch(err){ CU.err=err.code; refreshCU(); } }
   else if(a==='delboss'){ S.bosses=S.bosses.filter(x=>x.id!==b.dataset.boss); await Store.del('bosses/'+b.dataset.boss); renderBosses(); }
   else if(a==='eday'){ S.editDay=+b.dataset.i; renderEdit(); }
@@ -864,7 +865,7 @@ $('#view').addEventListener('submit',async e=>{
     const res = mode==='up' ? await Cloud.sb.auth.signUp({email,password}) : await Cloud.sb.auth.signInWithPassword({email,password});
     if(res.error){ toast(mode==='up'?'SIGN-UP FAILED':'SIGN-IN FAILED',res.error.message,'var(--red)'); return; }
     if(!res.data.session){ toast('CHECK YOUR EMAIL','Confirm your address from the email Supabase sent, then sign in here.','var(--yellow)'); return; }
-    Cloud.user=res.data.session.user; Cloud.joinMark(); await Cloud.sync(); await reloadFromStore();
+    Cloud.user=res.data.session.user; Cloud.joinMark(); await Cloud.sync(); await reloadFromStore(); initClickUp();
     toast(Cloud.status==='error'?'SYNC FAILED':'SYNC ON',Cloud.status==='error'?Cloud.err:'This device is now synced.',Cloud.status==='error'?'var(--red)':'var(--lime)'); return;
   }
   if(e.target.id==='oneoff-form'){
@@ -925,10 +926,10 @@ const CU = {mcp:null, tasks:[], state:'loading', err:'', done:{}, pending:{}};
 const CU_INPUT = {assignees:['me'], fields:['status','priority','due_date','list'], order_by:'due_date', reverse:true};
 function workBlockNow(){ const nm=nowMin(); return tasksFor(S.todayKey).find(t=>{ const tm=timing(t); return t.kind==='work'&&!tm.point&&nm>=tm.s&&nm<tm.e; })||null; }
 function nextWorkBlock(){ for(let i=0;i<8;i++){ const k=addDays(S.todayKey,i); const nm=i===0?nowMin():-1; const b=tasksFor(k).find(t=>{ const tm=timing(t); return t.kind==='work'&&!tm.point&&tm.s>nm; }); if(b) return {k,b}; } return null; }
-function cuMsg(code){ return ({needs_reauth:'Your ClickUp sign-in expired. Reconnect ClickUp in claude.ai Settings → Connectors.', server_not_connected:"ClickUp isn't connected for this account. Add it in claude.ai Settings → Connectors.", selection_required:'Choose which ClickUp connection to use in the prompt claude.ai shows.', not_in_manifest:"ClickUp is turned off for this app. Turn it on from the app's permissions menu.", approval_required:'ClickUp needs your approval for this app.', blocked_by_policy:'Your organization blocks this ClickUp action.', server_unavailable:"ClickUp isn't responding right now. It will retry automatically."})[code] || "Couldn't load ClickUp tasks right now."; }
+function cuMsg(code){ return ({needs_reauth:'Your ClickUp sign-in expired. Reconnect ClickUp in claude.ai Settings → Connectors.', server_not_connected:"ClickUp isn't connected for this account. Add it in claude.ai Settings → Connectors.", selection_required:'Choose which ClickUp connection to use in the prompt claude.ai shows.', not_in_manifest:"ClickUp is turned off for this app. Turn it on from the app's permissions menu.", approval_required:'ClickUp needs your approval for this app.', blocked_by_policy:'Your organization blocks this ClickUp action.', server_unavailable:"ClickUp isn't responding right now. It will retry automatically.", no_token:'Add your ClickUp API token to Supabase to load tasks here.', bad_token:'ClickUp rejected the API token stored in Supabase. Create a new one and update it.', not_deployed:"The ClickUp connection isn't set up in Supabase yet.", not_signed_in:'Sign in under Edit Routine → Cloud Sync to load your ClickUp tasks.', forbidden:"This account isn't allowed to use the ClickUp connection.", edge_error:"Couldn't reach ClickUp right now. It will retry automatically."})[code] || "Couldn't load ClickUp tasks right now."; }
 async function initClickUp(){
   if(window.claude && typeof window.claude.use==='function'){ try{ CU.mcp=await window.claude.use('mcp'); }catch(e){ CU.mcp=null; } }
-  if(!CU.mcp){ CU.state='off'; return refreshCU(); }
+  if(!CU.mcp){ if(!window.claude && Cloud.user){ CU.mode='edge'; if(CU.state!=='ok') CU.state='loading'; refreshCU(); return CUEdge.start(); } CU.mode=null; CU.state='off'; CU.tasks=[]; return refreshCU(); }
   CU.mcp.watchTool('ClickUp','clickup_filter_tasks',CU_INPUT,ev=>{
     if(ev.type==='data'){ const p=ev.result.payload||{}; CU.tasks=Array.isArray(p.tasks)?p.tasks:[]; CU.state='ok'; CU.err=''; }
     else { const c=(ev.error&&ev.error.code)||'upstream_error';
@@ -937,6 +938,15 @@ async function initClickUp(){
     refreshCU();
   },{refetchInterval:5*60*1000});
 }
+const CUEdge = { timer:null,
+  async call(body){
+    const {data,error}=await Cloud.sb.functions.invoke('clickup',{body});
+    if(error){ let code='edge_error'; try{ const st=error.context&&error.context.status; const j=error.context&&await error.context.json(); code=(j&&j.error)||(st===404?'not_deployed':st===401?'not_signed_in':code); }catch(e){} throw {code}; }
+    if(data&&data.error) throw {code:data.error}; return data;
+  },
+  async fetch(){ try{ const d=await this.call({action:'list'}); CU.tasks=Array.isArray(d.tasks)?d.tasks:[]; CU.state='ok'; CU.err=''; }catch(e){ CU.err=e.code||'edge_error'; if(CU.state!=='ok'||['no_token','bad_token','not_deployed','forbidden'].includes(CU.err)){ CU.state='error'; CU.tasks=[]; } } refreshCU(); },
+  start(){ this.fetch(); clearInterval(this.timer); this.timer=setInterval(()=>{ if(document.visibilityState==='visible') this.fetch(); },5*60*1000); }
+};
 function refreshCU(){ const el=$('#cu-slot'); if(S.tab==='today'&&el) el.innerHTML=cuHTML(); }
 function cuXP(t){ return Math.round(40*({urgent:2,high:1.5,normal:1,low:.8}[t.priority]||1)); }
 function dueInfo(t){ if(!t.due_date) return null; const d=new Date(Number(t.due_date)); const k=dkey(d); const end=fromKey(k); end.setHours(23,59,59,999); const dm=k.slice(8)+'/'+k.slice(5,7);
@@ -944,7 +954,7 @@ function dueInfo(t){ if(!t.due_date) return null; const d=new Date(Number(t.due_
 function cuHTML(){
   const open=CU.tasks.filter(t=>!CU.done[t.id]);
   const head=`<div class="ptitle"><span>CLICKUP · WORK TASKS</span><span>${CU.state==='ok'||CU.tasks.length?open.length+' OPEN':''}</span></div>`;
-  if(CU.state==='off') return `<section class="panel">${head}<p class="note">ClickUp tasks are available in the Claude version of the app for now.</p></section>`;
+  if(CU.state==='off') return `<section class="panel">${head}<p class="note">${window.claude?'Your ClickUp tasks show here when the app is opened in Claude.':'Sign in under Edit Routine → Cloud Sync to load your ClickUp tasks.'}</p></section>`;
   if(CU.state==='loading') return `<section class="panel">${head}<p class="note">Loading your ClickUp tasks…</p></section>`;
   if(CU.state==='error'&&!CU.tasks.length) return `<section class="panel">${head}<p class="note">${esc(cuMsg(CU.err))}</p>${CU.err==='approval_required'?'<button class="btn small" data-act="cu-retry" style="margin-top:8px">ALLOW CLICKUP</button>':''}</section>`;
   const w=workBlockNow();
@@ -965,7 +975,10 @@ async function completeCU(id, el){
   const d=dueInfo(t); const onTime=!d||Date.now()<=d.end; const xp=Math.round(cuXP(t)*(onTime?1.25:.5));
   CU.pending[id]=true; refreshCU();
   let closed=false, err=null;
-  try{ await CU.mcp.callTool('ClickUp','clickup_update_task',{task_id:id,status:'complete'}); closed=true; }catch(e){ err=e; }
+  try{
+    if(CU.mode==='edge'){ const r=await CUEdge.call({action:'complete',id}); if(!r||!r.ok) throw {code:'edge_error'}; }
+    else await CU.mcp.callTool('ClickUp','clickup_update_task',{task_id:id,status:'complete'});
+    closed=true; }catch(e){ err=e; }
   delete CU.pending[id];
   CU.done[id]={at:Date.now(),xp,onTime,name:t.name,closed};
   Store.set('clickup/done',{ids:CU.done});
@@ -974,7 +987,7 @@ async function completeCU(id, el){
   if(onTime){ Sfx.complete(3); FX.burst(cx,cy,['#ff8a3d','#ffd319','#2de2e6'],46,8); FX.pop(cx,cy-20,'+'+xp+' XP'); FX.pop(cx,cy-50,d?'BEAT THE DEADLINE':'TASK DONE','sm'); }
   else { Sfx.late(); FX.burst(cx,cy,['#ff8a3d','#ffd319'],18,5); FX.pop(cx,cy-20,'+'+xp+' XP'); FX.pop(cx,cy-50,'PAST DUE · HALF XP','sm'); }
   grantLoot(rollLoot(onTime,false)); checkAch(); saveProfile(); renderHUD(); refreshCU();
-  if(closed){ toast('CLOSED IN CLICKUP',t.name,'var(--k-work)'); CU.mcp.invalidate('ClickUp','clickup_filter_tasks').catch(()=>{}); }
+  if(closed){ toast('CLOSED IN CLICKUP',t.name,'var(--k-work)'); if(CU.mode==='edge') CUEdge.fetch(); else CU.mcp.invalidate('ClickUp','clickup_filter_tasks').catch(()=>{}); }
   else toast('SAVED HERE ONLY',`Couldn't mark it complete in ClickUp${err&&err.code?' ('+err.code+')':''}. Close it there when you can.`,'var(--yellow)');
 }
 
